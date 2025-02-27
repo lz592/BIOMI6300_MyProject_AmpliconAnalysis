@@ -1,4 +1,4 @@
 data/*
-data/*.fastq
-data/*.gz
-data/*.csv
+data/ena_data/*.fastq
+data/ena_data/*.gz
+data/metadata/*.csv
