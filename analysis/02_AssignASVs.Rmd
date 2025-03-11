@@ -374,6 +374,42 @@ plot_ReadDepth + plot_ASVRichness + plot_ReadDepth_ASVRichness +
 **INTERPRETATION #5:**
 *What conclusions can you draw from each of the three individual plots above? Please note anything important that the figure might indicate regarding your project data. Are there any specific notes and considerations for later?*
 
+The figure above consists of three plots that summarize sequencing depth, ASV richness, and their relationship after DADA2 processing of 16S rRNA gene sequencing data.
+
+*Panel A: Read Depth after DADA2: Histogram of sequencing depth per sample (Total # of Sequences)*
+•	The majority of samples have between 30,000 and 50,000 sequences, which suggests that sequencing depth is relatively high. 
+•	However, there is a large number of samples with 0 sequences, indicating that some samples completely failed to retain sequences.
+Implications: 
+•	Poor initial sequencing quality in those samples.
+•	Overly strict filtering parameters (e.g., trimming too many bases, leading to shorter-than-expected reads).
+•	Issues with primer removal or merging errors.
+Next steps: 
+•	Investigate the failed samples—were they originally low in read count before trimming?
+•	Consider adjusting trimming and filtering parameters to see if recovery is possible.
+
+*Panel B: ASV Richness after DADA2: Histogram of ASV richness (Total # of ASVs per sample)*
+•	The number of ASVs per sample follows a similar pattern to Panel A.
+•	Most samples have between 100 and 400 ASVs, which seems reasonable.
+•	However, some samples again show 0 ASVs, mirroring the pattern in Panel A.
+Implications: 
+•	If a sample has 0 sequences, it naturally has 0 ASVs.
+•	A sample with sequences but no ASVs could indicate an issue with denoising or chimera removal.
+Next steps: 
+•	Re-examine the truncLen and filterAndTrim() settings to ensure they are not overly aggressive.
+•	Consider relaxing chimera removal settings if too many sequences are getting filtered out.
+
+*Panel C: Read Depth vs ASV Richness: Scatter plot showing the relationship between sequencing depth and ASV richness.*
+•	Generally there might be a positive correlation, where samples with higher read depth tend to have more ASVs. This helps show the importance of rarefaction.
+•	A few samples with very low sequence counts have nearly 0 ASVs, indicating the issue (i.e. sequencing failures, poor-quality samples, and/or negative controls) observed in Panels A and B.
+Next steps: 
+•	If the variation is expected (e.g., due to different sample sources), it may not be a concern.
+•	If some samples have abnormally high or low ASV retention, investigate whether they were affected by sequencing quality or pipeline settings.
+
+*Considerations for Later*
+•	Investigate why some samples have 0 sequences and 0 ASVs.
+•	Check filtering and trimming parameters to see if adjustments could improve retention.
+•	Assess chimera removal settings—if too strict, it may be removing too many real sequences.
+•	Compare diversity metrics across samples to see if sequencing bias exists.
 
 # Assign Taxonomy 
 ```{r assign-tax}
