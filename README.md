@@ -20,7 +20,5 @@ Re-running 16S rRNA sequencing to analyze the microbial community composition in
 # The region of the 16S gene that was used:
 ??? (cannot find it in the paper)
 # The name and sequence of the primers:
-515F (5'- GTGCCAGCMGCCGCGG - 3')
-907R (5'- CCGTCAATTCMTTTRAGTTT - 3')
+515F (5'- GTGCCAGCMGCCGCGG - 3'); 907R (5'- CCGTCAATTCMTTTRAGTTT - 3')
 The length of the expected amplicon is 392bp.
-
