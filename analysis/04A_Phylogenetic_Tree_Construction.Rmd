@@ -1,0 +1,117 @@
+---
+title: "Phylogenetic Tree Construction with FastTree2"
+author: "Liangzi"
+date: "2025-03-28"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup 
+
+## Timing of this script
+```{r rmd-start}
+# What time did we start running this script? 
+start_time <- Sys.time()
+```
+
+## Set Seed 
+```{r set-seed}
+set.seed(238438)
+```
+
+## Load Packages 
+```{r load-packages}
+# Install phytools
+#remotes::install_github("liamrevell/phytools")
+
+# Install ggtree
+#devtools::install_github("GuangchuangYu/ggtree")
+
+# Now load them into the session 
+pacman::p_load(phytools, ggtree, tidyverse, install = FALSE)
+```
+
+## 1. Load Data 
+```{r load-physeq}
+# Load physeq 
+load("data/03_PreProcessing/raw_preprocessed_physeq.RData")
+raw_preprocessed_physeq
+```
+
+# 2. Write ASV Fasta 
+```{r asv-fasta}
+# Pull out ASV sequences and ASV names
+asv_seq_df <- 
+  raw_preprocessed_physeq@tax_table %>% 
+  data.frame() %>% 
+  dplyr::select(ASV, ASVseqs)
+
+#View(asv_seq_df)
+
+# Add the ">" to make fasta header
+asv_seq_df$ASV <- paste0(">", asv_seq_df$ASV)
+
+#View(asv_seq_df)
+
+# Create fasta object
+asv_seq_fasta <- c(rbind(asv_seq_df$ASV, asv_seq_df$ASVseqs))
+head(asv_seq_fasta)
+
+# Write to a fasta file 
+write(asv_seq_fasta, 
+      file = "data/04_PhylogeneticTree/preprocessed_ASVs.fasta")
+```
+
+
+# 3. Run Alignment with MAAFT 
+- **Mac:** `command` + `option` + `enter` will send line-by-line code 
+```{r run-mafft, engine = 'bash', engine.opts = '-l'}
+# Write bash code to run MAFFT
+# First provide the path to MAFFT
+export PATH=/programs/mafft/bin:$PATH
+
+# Where am I? 
+echo "The working directory is $PWD"
+
+# Set a seed for consistency and reproducibility 
+RANDOM=238428
+
+# Now, actually run MAFFT
+/programs/mafft/bin/mafft --auto data/04_PhylogeneticTree/preprocessed_ASVs.fasta > data/04_PhylogeneticTree/MAFFT_aligned_ASVs.fasta
+```
+
+# 4. Calculate the phylogenetic tree with FastTree2
+```{r run-fasttree2, engine = 'bash', engine.opts = '-l'}
+# Where am I? 
+echo "The working directory is $PWD"
+
+# Load fasttree 
+# Provide export pathg to fasttree 
+export PATH=/programs/FastTree-2.1.11:$PATH
+
+# Run Fasttree to generate phylogenetic tree 
+FastTree -nt -gtr -fastest -log data/04_PhylogeneticTree/FastTree.log data/04_PhylogeneticTree/MAFFT_aligned_ASVs.fasta > data/04_PhylogeneticTree/ASVs_unrooted.tree
+```
+
+# Final info for Reproducibility 
+
+## Check Render Time
+```{r stop-time}
+# Take the time now that we are at the end of the script
+end_time <- Sys.time()
+end_time 
+
+# Echo the elapsed time
+elapsed_time <- round((end_time - start_time), 3)
+elapsed_time
+```
+
+## Session Information
+
+```{r session-info}
+# Ensure reproducibility with package version information
+devtools::session_info()
+```
+
+
