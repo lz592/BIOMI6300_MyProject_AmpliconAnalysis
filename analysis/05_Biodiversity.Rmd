@@ -1,0 +1,520 @@
+---
+title: "Biodiversity across a salinity gradient"
+author: "Liangzi"
+date: "2025-04-08"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      fig.path = "../figures/05_Biodiversity/")
+```
+
+
+# Scientific Question
+
+## Question & Hypotheses
+How does microbial alpha diversity differ between bioreactor samples with different oxygen concentrations?
+- 'Sample.Name' includes oxygen-related indicators (e.g., 20O2, 10O2, 5O2).
+
+- *Null Hypothesis:* 
+Microbial alpha diversity (e.g., ASV richness or Shannon diversity) does not differ significantly among bioreactor samples across different oxygen concentrations.
+- *Alternative Hypothesis:* 
+Microbial alpha diversity does vary across different oxygen concentrations, potentially decreasing under lower oxygen conditions due to shifts in community composition.
+
+## Field site background
+This study used microbial 16S rRNA gene sequencing from bioreactor samples. The experimental design includes the different oxygen levels that are likely to allow us to evaluate biodiversity differences.
+
+*Let's get to calculating Biodiversity!*
+
+
+# Set up the Environment 
+
+## Timing of this script
+
+```{r rmd-start}
+# What time did we start running this script? 
+start_time <- Sys.time()
+```
+
+## Set the seed 
+```{r set-seed}
+set.seed(238428)
+```
+
+## Load Packages & Colors 
+
+```{r load-packages-colors}
+# install packages for stats
+#install.packages("rstatix")
+#install.packages("ggpubr")
+
+pacman::p_load(tidyverse, devtools, patchwork, iNEXT, phyloseq,
+               # packages for stats
+               ggpubr, rstatix, install = FALSE)
+```
+
+## Load in Data 
+
+```{r load-data}
+# Since I don't have 'archaeal_rooted_physeq' in the dataset, I would just load 'midpoint_rooted_physeq.RData' for this part of analysis
+
+load("data/04_PhylogeneticTree/midpoint_rooted_physeq.RData")
+
+# take a look at it! 
+midpoint_rooted_physeq
+
+# Intuition check on seq depth
+min(sample_sums(midpoint_rooted_physeq))
+
+# Make a metadata dataframe 
+metadata_df <- 
+  midpoint_rooted_physeq %>%
+  sample_data() %>%
+  data.frame()
+
+# Extract oxygen level (e.g., 20 from "AME-D2-20O2-16s")
+metadata_df <- 
+  metadata_df %>%
+  mutate(oxygen_level = str_extract(Sample.Name, "\\d+(?=O2)"))
+# Convert to numeric
+metadata_df$oxygen_level <- as.numeric(metadata_df$oxygen_level)
+
+# Add back into phyloseq
+sample_data(midpoint_rooted_physeq) <- sample_data(metadata_df)
+
+# view of it
+glimpse(metadata_df)
+```
+
+
+# Biodiversity Hill Numbers with iNEXT
+
+```{r iNEXT-biodiversity}
+# prepare the input data 
+# Species in rows and the samples in columns 
+iNEXT_input_df <- 
+  midpoint_rooted_physeq %>%
+  otu_table() %>%
+  data.frame()
+
+# Inpect 
+dim(iNEXT_input_df)
+iNEXT_input_df[1:5, 1:5]
+
+# Run iNEXT 
+# Remember to set the seed!
+# ASVs in ROWs, samples in COLUMNS 
+iNEXT_data <- iNEXT(iNEXT_input_df, 
+                    q = c(0, 1, 2),
+                    datatype = "abundance")
+```
+
+```{r load-iNEXT-data}
+# Inspect 
+str(iNEXT_data)
+typeof(iNEXT_data)
+```
+
+
+# Rarefaction Curves 
+
+## `ggiNEXT` Rarefaction Curves 
+
+```{r iNEXT-colors}
+# Prepare Colors 
+color_df <- 
+  iNEXT_input_df %>%
+  colnames() %>%
+  data.frame()
+# Check
+head(color_df)
+# Rename the column 
+colnames(color_df)[1] <- "names"
+# Check
+head(color_df)
+
+# Make a helper dataframe for plotting with colors 
+iNEXT_color_df <- 
+  color_df %>%
+  # Merge with metadata
+  left_join(metadata_df, by = "names")
+
+head(iNEXT_color_df)
+```
+
+```{r plot-iNEXT-rarefaction}
+# Check how many groups need to be colored
+length(unique(iNEXT_color_df$oxygen_level))
+
+# Plot it
+ggiNEXT(iNEXT_data, type = 1, facet.var = "Order.q") +
+  theme_bw() +
+  theme(legend.position = "none") + 
+  labs(y = "Effective Number of ASVs", x = "Number of Sequences") 
+```
+
+## Manual Rarefaction Curves 
+
+```{r manual-rarefaction}
+# Build df for manual rarefaction curves
+iNEXT_manual_df <- iNEXT_data$iNextEst$size_based %>%
+  rename(names = Assemblage) %>%
+  left_join(iNEXT_color_df %>% dplyr::select(names, oxygen_level), by = "names")
+
+library(ggplot2)
+
+# Make sure oxygen_level is a factor
+iNEXT_manual_df$oxygen_level <- factor(iNEXT_manual_df$oxygen_level)
+
+# Count how many colors are needed
+n_oxygen_levels <- length(unique(iNEXT_manual_df$oxygen_level))
+
+# Plot manually
+iNEXT_manual_df %>%
+  dplyr::filter(Method == "Rarefaction") %>%
+  ggplot(aes(x = m, y = qD, color = oxygen_level, group = names)) +
+  geom_line(alpha = 0.8) +
+  facet_grid(Order.q ~ oxygen_level, scales = "free") +
+  scale_color_manual(values = scales::hue_pal()(n_oxygen_levels)) +
+  theme_bw() +
+  labs(
+    y = "Effective Number of ASVs",
+    x = "Number of Sequences",
+    title = "Rarefaction Curves Grouped by Oxygen Level"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+**INTERPRETATION #1:  What can you conclude from the ggiNEXT and manual rarefaction curve plots? Are there "enough" sequences to analyze the samples? Is it valid to make any conclusions about species richness when q = 0? What about when q = 1? Or q = 2? Why or why not?**
+
+The ggiNEXT plot displays rarefaction curves for each individual sample across diversity orders (q = 0, 1, 2). While helpful for showing overall trends, it can be difficult to distinguish sample-specific patterns or how alpha diversity varies by categorical variables like oxygen level.
+
+The faceted rarefaction plot resolves this by grouping samples by oxygen concentration. This allows us to compare how microbial diversity changes with oxygen levels, across orders of diversity (q).
+
+*Richness: q = 0*
+All samples appear to plateau, which indicates sequencing depth was sufficient to capture the total ASV richness in each sample. This supports the validity of conclusions drawn at q = 0.
+Differences across oxygen levels are visible, with samples at oxygen level 25 having generally higher richness than those at lower levels, especially compared to level 5.
+Samples with no oxygen addition (NA) show wide variation, suggesting heterogeneous conditions or possibly a mix of sample types.
+
+*Shannon Diversity: q = 1*
+The curves still plateau, though at lower effective numbers of ASVs. This is expected, as q = 1 downweights rare taxa.
+There's less separation between oxygen levels than with q = 0, suggesting that while richness differs, evenness among samples is more comparable.
+Samples with oxygen levels of 20 and 25 appear to maintain higher diversity, possibly due to more balanced microbial communities in more oxygenated conditions.
+
+*Simpson Diversity: q = 2*
+These curves plateau early and display strongest downweighting of rare taxa, focusing on the most dominant species.
+Oxygen levels of 25 again show higher effective diversity, indicating that not only are more species present, but dominant taxa are more evenly distributed.
+Low oxygen (e.g., level 5) samples have consistently lower q = 2 diversity, pointing to microbial communities dominated by a few taxa—potentially due to hypoxia tolerance.
+
+
+# Statististical Testing 
+
+## Parametric vs. Non-Parametric Statistics
+
+*Run Shapiro-Wilk for Salinity*
+
+```{r shapiro-wilk-salinity}
+distinct_metadata_df <- 
+  metadata_df
+  # There are some redundant samples, let's remove them
+  #dplyr::filter(fraction == "Whole") 
+
+# Test of the data is normal for the continuous value of salinity
+shapiro.test(distinct_metadata_df$oxygen_level)
+```
+
+So, the test above has a p-value < 0.05, indicating that we can reject the H₀, which will indicate that the data is **not normal**. Therefore, we need to use non-parametric statistical tests in the data. 
+
+*Is the richness data normal?*
+
+```{r shapiro-wilk-richness}
+### Now what about for richness? 
+obs_div_df <- 
+  iNEXT_manual_df %>%
+  dplyr::filter(Method == "Observed") 
+
+# check it
+glimpse(obs_div_df)
+
+# Pull out unique data from the three fractions of samples 
+obs_whole_rich_df <- 
+  obs_div_df %>%
+  #dplyr::filter(fraction == "Whole") %>%
+  dplyr::filter(Order.q == 0)
+
+# Test of the data is normal for the continuous value of richness
+shapiro.test(obs_whole_rich_df$qD)
+```
+
+YES! The diversity data is normal. This means that when we run these tests, we can use parametric tests that assume normality of our data. This makes our statistical testing a lot more robust. Therefore, we can use ANOVA.
+
+
+## Statistics in Microbial Ecology
+
+# Categorical Analysis: 2 or more groups 
+
+# Oxygen level by names
+
+```{r station-salinity, fig.height=4, fig.width=4}
+# Run Kruskal-Wallis test for alpha diversity vs oxygen_level
+kw_oxygen <- obs_div_df %>%
+  kruskal_test(qD ~ oxygen_level)
+
+# Post-hoc test with Dunn's Test
+dunn_oxygen <- obs_div_df %>%
+  dunn_test(qD ~ oxygen_level, p.adjust.method = "fdr") %>%
+  add_xy_position(x = "oxygen_level")
+
+# View results
+kw_oxygen
+dunn_oxygen
+
+# Oxygen level by qD
+oxygen_ggboxplot <- 
+  ggboxplot(obs_div_df, x = "oxygen_level", y = "names", 
+          color = "oxygen_level", fill = "oxygen_level", alpha = 0.3,
+          outlier.shape = NA) + 
+  geom_jitter(aes(color = oxygen_level)) + 
+  labs(y = "Effective Number of ASVs") + 
+  stat_pvalue_manual(dunn_oxygen, hide.ns = TRUE,
+                     tip.length = 0, step.increase = 0.01) +
+  labs(subtitle = get_test_label(kw_oxygen, detailed = TRUE),
+       caption = get_pwc_label(dunn_oxygen)) +
+  theme_bw() + 
+  theme(legend.position = "bottom",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 30, hjust = 1))
+
+# Show the plot
+oxygen_ggboxplot
+```
+
+### Diversity by Oxygen level
+
+```{r make-obs-df}
+# Plot boxplots by oxygen level against diversity
+ggboxplot(obs_div_df, x = "oxygen_level", y = "qD", 
+          color = "oxygen_level", fill = "oxygen_level", alpha = 0.3,
+          outlier.shape = NA) + 
+  facet_wrap(.~Order.q, scales = "free_y") + 
+  geom_jitter(aes(color = oxygen_level)) + 
+  labs(y = "Effective Number of ASVs") + 
+  stat_pvalue_manual(dunn_oxygen, hide.ns = TRUE,
+                     tip.length = 0, step.increase = 0.01) +
+  labs(subtitle = get_test_label(kw_oxygen, detailed = TRUE),
+       caption = get_pwc_label(dunn_oxygen)) +
+  theme_bw() + 
+  theme(legend.position = "bottom",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
+
+#### Statistically test Richness
+
+```{r station-diversity-richness, fig.height=4, fig.width=4}
+# Filter richness
+obs_rich_df <- obs_div_df %>%
+  filter(Order.q == 0)
+# ANOVA test
+anova_oxygen_rich <- 
+  aov(qD ~ oxygen_level, data = obs_rich_df)
+
+# Look at it 
+anova_oxygen_rich
+summary(anova_oxygen_rich)
+
+# Richness by oxygen level
+rich_ggboxplot <- 
+  ggboxplot(obs_rich_df, x = "oxygen_level", y = "qD", 
+          color = "oxygen_level", fill = "oxygen_level", alpha = 0.3,
+          outlier.shape = NA) + 
+  geom_jitter(aes(color = oxygen_level)) + 
+  labs(y = "# of Total ASVs (Richness)") + 
+  stat_compare_means(method = "anova", label.y = max(obs_rich_df$qD, na.rm = TRUE)) + 
+  geom_pwc(aes(group = oxygen_level), tip.length = 0, hide.ns = TRUE,
+           method = "t_test", label = "p.adj.format",
+           p.adjust.method = "fdr", bracket.nudge.y = -0.08) +
+  theme_bw() + 
+  theme(legend.position = "none",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
+
+### Simpson
+
+```{r station-diversity-simpson, fig.height=4, fig.width=4}
+# Pull out simpson data 
+obs_simps_df <- 
+  obs_div_df %>%
+  filter(Order.q == 2)
+
+# Calculate the ANOVA since the data is normal
+anova_oxygen_simps <- 
+  aov(qD ~ oxygen_level, data = obs_simps_df)
+
+# Look at it 
+anova_oxygen_simps
+summary(anova_oxygen_simps)
+
+# Simpson by oxygen level
+simps_ggboxplot <- 
+  ggboxplot(obs_simps_df, x = "oxygen_level", y = "qD", 
+          color = "oxygen_level", fill = "oxygen_level", alpha = 0.3,
+          outlier.shape = NA) + 
+  geom_jitter(aes(color = oxygen_level)) + 
+  labs(y = "# of Dominant ASVs (Simpson)") +
+  stat_compare_means(method = "anova", label.y = max(obs_simps_df$qD, na.rm = TRUE)) + 
+  geom_pwc(aes(group = oxygen_level), tip.length = 0, hide.ns = TRUE,
+           method = "t_test", label = "p.adj.signif",
+           step.increase = 0.08,
+           p.adjust.method = "fdr", bracket.nudge.y = -0.08) + 
+  theme_bw() + 
+  theme(legend.position = "none",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+# Show the plots together 
+rich_ggboxplot + simps_ggboxplot
+```
+
+**INTERPRETATION #2: If you have categorical data, what can you conclude regarding the role that all ASVs (richess, q = 0) versus common ASVs (Shannon, q = 1) versus dominant ASVs (Simpson, q = 2) have on the biodiversity of your samples as it relates to your variable of interest?**
+
+*Richness: q = 0*
+Samples exposed to lower oxygen concentrations exhibited substantially higher richness, indicating that more ASV types were present. This suggests low oxygen levels promotes taxonomic diversity, likely by enabling broader niche specialization or metabolic diversity.
+
+*Shannon Diversity: q = 1*
+Shannon diversity decreased with oxygen level increase, but more dramatically than richness. This suggests that while more taxa are present at low oxygen, their relative abundances are not evenly distributed.
+
+*Simpson Diversity: q = 2*
+The less oxygen-rich environments supported not just more ASVs, but also a more balanced community, as indicated by higher Simpson diversity. In contrast, high-oxygen samples were dominated by a few tolerant taxa, lowering q = 2 values.
+
+
+**INTERPRETATION #3: How did you statistically test your scientific question in Interpretation #2? Why?**
+
+I used Kruskal-Wallis Tests and Post-Hoc Dunn’s Test.
+Kruskal-Wallis is appropriate for non-normal or heteroscedastic data. It is commonly used in ecological datasets. Dunn’s test pinpoints where the differences lie between group pairs. Dunn’s test pinpoints where the differences lie between group pairs. 
+This approach is robust and interpretable, giving insight into how oxygen levels shift entire community structures, not just mean values.
+
+
+# Continuous Relationships - Oxygen level vs Biodiversity
+
+## Environmental Variables 
+
+There are no environmental variables in the metadata of this research, and the only factor that affect the biodiversity is oxygen level provided into the bioreactor. 
+
+## Continuous Variable
+
+```{r plot-div-salinity-lm, fig.width=7, fig.height=3.5}
+# How does biodiversity change over the oxygen level?
+obs_div_df %>%
+  ggplot(aes(x = oxygen_level, y = qD, color = oxygen_level)) + 
+  facet_wrap(.~Order.q, scales = "free") + 
+  geom_point(aes(color = oxygen_level)) + 
+  labs(x = "Oxygen Level", y = "Effective Number of ASVs") +
+  stat_smooth(method = "lm", formula = y ~poly(x, 2)) + 
+  theme_bw() + 
+  theme(legend.position = "bottom",
+        legend.title = element_blank())
+```
+
+### Explore Richness More
+
+```{r richness-vs-salinity}
+# Make a richness data frame
+richness_df <- 
+  obs_div_df %>%
+  dplyr::filter(Method == "Observed") %>%
+  dplyr::filter(Order.q == 0)
+
+# Actually run the linear model
+rich_vs_oxy_lm <- 
+  lm(qD ~ oxygen_level, data = richness_df)
+
+# Show me the model results
+rich_vs_oxy_lm
+
+# Type?
+class(rich_vs_oxy_lm)
+
+# Summary of lm
+summary(rich_vs_oxy_lm)
+```
+
+```{r plot-richness-sal, fig.height=4, fig.width=4, warning = FALSE}
+richness_df %>% 
+  ggplot(aes(x = oxygen_level, y = qD)) + 
+  geom_point(aes(color = oxygen_level)) + 
+  stat_smooth(method = "lm") + 
+  labs(x = "Oxygen Level", y = "# of ASVs") + 
+  theme_bw() + 
+  theme(legend.position = "bottom",
+        legend.title = element_blank()) + 
+  geom_label(aes(x = 20, y = 60), hjust = 0, 
+             label = paste("Adj R2 = ",signif(summary(rich_vs_oxy_lm)$adj.r.squared, 2),
+                           "\nIntercept =",signif(rich_vs_oxy_lm$coef[[1]],3),
+                           " \nSlope =",signif(rich_vs_oxy_lm$coef[[2]], 2),
+                           " \nP =",signif(summary(rich_vs_oxy_lm)$coef[2,4], 2)))
+```
+
+## Spearman Correlation
+
+```{r rich-vs-salinity-spearman, fig.width=4, fig.height=4}
+richness_df %>% 
+  ggplot(aes(x = oxygen_level, y = qD)) + 
+  geom_point(aes(color = oxygen_level)) + 
+  stat_smooth(method = "lm") + 
+  labs(x = "Oxygen Level", y = "# of ASVs") + 
+  theme_bw() + 
+  theme(legend.position = "bottom",
+        legend.title = element_blank()) + 
+  stat_cor(method = "spearman", label.x = 3, label.y = 30)  # customize label position
+```
+
+**INTERPRETATION #4: If you have continuous data, what can you conclude regarding the role that all ASVs (richess, q = 0) versus common ASVs (Shannon, q = 1) versus dominant ASVs (Simpson, q = 2) have on the biodiversity of your samples as it relates to your variable of interest?**
+
+The trend line cannot be plotted and showed on the plots. 
+But I am still able to observe the general trend based on the points.
+
+*Richness: q = 0*
+ASV richness increases up to a mid-range oxygen level and then goes down, indicating oxygen facilitates diversity at the relatively low level, but the effect become negative possibly due to niche saturation.
+
+*Shannon Diversity: q = 1*
+A negative trend is observed, suggesting more even communities form as oxygen decrease. The decrease is more linear than for richness.
+
+*Simpson Diversity: q = 1*
+Dominant ASVs do not vary as strongly with oxygen level beyond 10. This suggests dominant taxa are stable across oxygen gradients, while rare/common ASVs are more oxygen-sensitive.
+
+
+**INTERPRETATION #5:  How did you statistically test your scientific question in Interpretation #4? Why?**
+
+I used Linear Models (LM) with Polynomial Term which gives non-linear (curved) relationships, capturing hump-shaped or plateauing trends across gradients. I also used Model Evaluation to assese Adjusted R², P-values, and Coefficient directionality. 
+
+Linear regression is ideal for continuous predictors like oxygen concentration.Polynomial terms are added to model curvature, and it is important in ecological gradients. It provides interpretable effect sizes (slopes) and significance for hypothesis testing.
+Spearman correlations also have been used for rank-based relationships that don't assume linearity.
+
+
+# Final info for Reproducibility 
+
+## Check Render Time
+```{r stop-time}
+# Take the time now that we are at the end of the script
+end_time <- Sys.time()
+end_time 
+
+# Echo the elapsed time
+elapsed_time <- round((end_time - start_time), 3)
+elapsed_time
+```
+
+## Session Information
+
+```{r session-info}
+# Ensure reproducibility with package version information
+devtools::session_info()
+```
+
+
