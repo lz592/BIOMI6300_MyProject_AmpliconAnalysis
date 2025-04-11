@@ -364,13 +364,13 @@ gradient</h1>
 <h2>Question &amp; Hypotheses</h2>
 <p>How does microbial alpha diversity differ between bioreactor samples
 with different oxygen concentrations? - ‘Sample.Name’ includes
-oxygen-related indicators (e.g., 20O2, 10O2, 5O2).</p>
+oxygen-related indicators (e.g., 20%O2, 10%O2, 5%O2, NA).</p>
 <ul>
 <li><em>Null Hypothesis:</em> Microbial alpha diversity (e.g., ASV
 richness or Shannon diversity) does not differ significantly among
 bioreactor samples across different oxygen concentrations.</li>
 <li><em>Alternative Hypothesis:</em> Microbial alpha diversity does vary
-across different oxygen concentrations, potentially decreasing under
+across different oxygen concentrations, potentially increasing under
 lower oxygen conditions due to shifts in community composition.</li>
 </ul>
 </div>
@@ -405,11 +405,11 @@ pacman::p_load(tidyverse, devtools, patchwork, iNEXT, phyloseq,
 </div>
 <div id="load-in-data" class="section level2">
 <h2>Load in Data</h2>
-<pre class="r"><code># Since I don&#39;t have &#39;archaeal_rooted_physeq&#39; in the dataset, I would just load &#39;midpoint_rooted_physeq.RData&#39; for this part of analysis
+<pre class="r"><code># Since I don&#39;t have &#39;archaeal_rooted_physeq&#39; in the dataset, I would just load &#39;midpoint_rooted_physeq.RData&#39; for this part of analysis :)
 
 load(&quot;data/04_PhylogeneticTree/midpoint_rooted_physeq.RData&quot;)
 
-# take a look at it! 
+# take a look at it 
 midpoint_rooted_physeq</code></pre>
 <pre><code>## phyloseq-class experiment-level object
 ## otu_table()   OTU Table:         [ 2115 taxa and 19 samples ]
@@ -419,13 +419,13 @@ midpoint_rooted_physeq</code></pre>
 <pre class="r"><code># Intuition check on seq depth
 min(sample_sums(midpoint_rooted_physeq))</code></pre>
 <pre><code>## [1] 24199</code></pre>
-<pre class="r"><code># Make a metadata dataframe 
+<pre class="r"><code># Make a metadata df 
 metadata_df &lt;- 
   midpoint_rooted_physeq %&gt;%
   sample_data() %&gt;%
   data.frame()
 
-# Extract oxygen level (e.g., 20 from &quot;AME-D2-20O2-16s&quot;)
+# Extract oxygen level from &#39;Sample.Names&#39; (e.g., 20 from &quot;AME-D2-20O2-16s&quot;)
 metadata_df &lt;- 
   metadata_df %&gt;%
   mutate(oxygen_level = str_extract(Sample.Name, &quot;\\d+(?=O2)&quot;))
@@ -490,7 +490,7 @@ iNEXT_input_df &lt;-
   otu_table() %&gt;%
   data.frame()
 
-# Inpect 
+# Inspect 
 dim(iNEXT_input_df)</code></pre>
 <pre><code>## [1] 2115   19</code></pre>
 <pre class="r"><code>iNEXT_input_df[1:5, 1:5]</code></pre>
@@ -1131,11 +1131,11 @@ assume linearity.</p>
 <pre class="r"><code># Take the time now that we are at the end of the script
 end_time &lt;- Sys.time()
 end_time </code></pre>
-<pre><code>## [1] &quot;2025-04-10 16:52:21 EDT&quot;</code></pre>
+<pre><code>## [1] &quot;2025-04-11 12:19:14 EDT&quot;</code></pre>
 <pre class="r"><code># Echo the elapsed time
 elapsed_time &lt;- round((end_time - start_time), 3)
 elapsed_time</code></pre>
-<pre><code>## Time difference of 13.008 mins</code></pre>
+<pre><code>## Time difference of 13.111 mins</code></pre>
 </div>
 <div id="session-information" class="section level2">
 <h2>Session Information</h2>
@@ -1151,7 +1151,7 @@ devtools::session_info()</code></pre>
 ##  collate  en_US.UTF-8
 ##  ctype    en_US.UTF-8
 ##  tz       America/New_York
-##  date     2025-04-10
+##  date     2025-04-11
 ##  pandoc   3.1.1 @ /usr/lib/rstudio-server/bin/quarto/bin/tools/ (via rmarkdown)
 ## 
 ## ─ Packages ───────────────────────────────────────────────────────────────────
