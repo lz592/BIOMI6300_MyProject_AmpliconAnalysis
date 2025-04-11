@@ -18,12 +18,12 @@ knitr::opts_chunk$set(echo = TRUE,
 
 ## Question & Hypotheses
 How does microbial alpha diversity differ between bioreactor samples with different oxygen concentrations?
-- 'Sample.Name' includes oxygen-related indicators (e.g., 20O2, 10O2, 5O2).
+- 'Sample.Name' includes oxygen-related indicators (e.g., 20%O2, 10%O2, 5%O2, NA).
 
 - *Null Hypothesis:* 
 Microbial alpha diversity (e.g., ASV richness or Shannon diversity) does not differ significantly among bioreactor samples across different oxygen concentrations.
 - *Alternative Hypothesis:* 
-Microbial alpha diversity does vary across different oxygen concentrations, potentially decreasing under lower oxygen conditions due to shifts in community composition.
+Microbial alpha diversity does vary across different oxygen concentrations, potentially increasing under lower oxygen conditions due to shifts in community composition.
 
 ## Field site background
 This study used microbial 16S rRNA gene sequencing from bioreactor samples. The experimental design includes the different oxygen levels that are likely to allow us to evaluate biodiversity differences.
@@ -60,23 +60,23 @@ pacman::p_load(tidyverse, devtools, patchwork, iNEXT, phyloseq,
 ## Load in Data 
 
 ```{r load-data}
-# Since I don't have 'archaeal_rooted_physeq' in the dataset, I would just load 'midpoint_rooted_physeq.RData' for this part of analysis
+# Since I don't have 'archaeal_rooted_physeq' in the dataset, I would just load 'midpoint_rooted_physeq.RData' for this part of analysis :)
 
 load("data/04_PhylogeneticTree/midpoint_rooted_physeq.RData")
 
-# take a look at it! 
+# take a look at it 
 midpoint_rooted_physeq
 
 # Intuition check on seq depth
 min(sample_sums(midpoint_rooted_physeq))
 
-# Make a metadata dataframe 
+# Make a metadata df 
 metadata_df <- 
   midpoint_rooted_physeq %>%
   sample_data() %>%
   data.frame()
 
-# Extract oxygen level (e.g., 20 from "AME-D2-20O2-16s")
+# Extract oxygen level from 'Sample.Names' (e.g., 20 from "AME-D2-20O2-16s")
 metadata_df <- 
   metadata_df %>%
   mutate(oxygen_level = str_extract(Sample.Name, "\\d+(?=O2)"))
@@ -101,7 +101,7 @@ iNEXT_input_df <-
   otu_table() %>%
   data.frame()
 
-# Inpect 
+# Inspect 
 dim(iNEXT_input_df)
 iNEXT_input_df[1:5, 1:5]
 
@@ -217,7 +217,7 @@ Low oxygen (e.g., level 5) samples have consistently lower q = 2 diversity, poin
 
 *Run Shapiro-Wilk for Salinity*
 
-```{r shapiro-wilk-salinity}
+```{r shapiro-wilk-oxygen}
 distinct_metadata_df <- 
   metadata_df
   # There are some redundant samples, let's remove them
@@ -259,7 +259,7 @@ YES! The diversity data is normal. This means that when we run these tests, we c
 
 # Oxygen level by names
 
-```{r station-salinity, fig.height=4, fig.width=4}
+```{r samples-oxygenlevel, fig.height=4, fig.width=4}
 # Run Kruskal-Wallis test for alpha diversity vs oxygen_level
 kw_oxygen <- obs_div_df %>%
   kruskal_test(qD ~ oxygen_level)
@@ -315,7 +315,7 @@ ggboxplot(obs_div_df, x = "oxygen_level", y = "qD",
 
 #### Statistically test Richness
 
-```{r station-diversity-richness, fig.height=4, fig.width=4}
+```{r oxygen-diversity-richness, fig.height=4, fig.width=4}
 # Filter richness
 obs_rich_df <- obs_div_df %>%
   filter(Order.q == 0)
@@ -346,7 +346,7 @@ rich_ggboxplot <-
 
 ### Simpson
 
-```{r station-diversity-simpson, fig.height=4, fig.width=4}
+```{r oxygen-diversity-simpson, fig.height=4, fig.width=4}
 # Pull out simpson data 
 obs_simps_df <- 
   obs_div_df %>%
@@ -404,11 +404,20 @@ This approach is robust and interpretable, giving insight into how oxygen levels
 
 ## Environmental Variables 
 
-There are no environmental variables in the metadata of this research, and the only factor that affect the biodiversity is oxygen level provided into the bioreactor. 
+In this study, they have some other environmental factors except oxygen level, such as methane level and ammonia level. But these two factors' data didn't include in the metadata. Therefore, I could not do this part as below:
+```{r env-variables}
+# Create dataframe of environmental variables 
+#env_df <- 
+  #metadata_df %>%
+  #dplyr::select(names, methane_level:ammonia_levle)
+
+# Pair-wise interactions between env var
+#pairs(dplyr::select(env_df, -names), upper.panel = NULL)
+```
 
 ## Continuous Variable
 
-```{r plot-div-salinity-lm, fig.width=7, fig.height=3.5}
+```{r plot-div-oxygen-lm, fig.width=7, fig.height=3.5}
 # How does biodiversity change over the oxygen level?
 obs_div_df %>%
   ggplot(aes(x = oxygen_level, y = qD, color = oxygen_level)) + 
@@ -423,7 +432,7 @@ obs_div_df %>%
 
 ### Explore Richness More
 
-```{r richness-vs-salinity}
+```{r richness-vs-oxygen}
 # Make a richness data frame
 richness_df <- 
   obs_div_df %>%
@@ -444,7 +453,7 @@ class(rich_vs_oxy_lm)
 summary(rich_vs_oxy_lm)
 ```
 
-```{r plot-richness-sal, fig.height=4, fig.width=4, warning = FALSE}
+```{r plot-richness-O2, fig.height=4, fig.width=4, warning = FALSE}
 richness_df %>% 
   ggplot(aes(x = oxygen_level, y = qD)) + 
   geom_point(aes(color = oxygen_level)) + 
@@ -462,7 +471,7 @@ richness_df %>%
 
 ## Spearman Correlation
 
-```{r rich-vs-salinity-spearman, fig.width=4, fig.height=4}
+```{r rich-vs-oxygen-spearman, fig.width=4, fig.height=4}
 richness_df %>% 
   ggplot(aes(x = oxygen_level, y = qD)) + 
   geom_point(aes(color = oxygen_level)) + 
