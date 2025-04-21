@@ -1,0 +1,625 @@
+---
+title: 'Between-Sample (Beta) Diversity of Microbes along a Salinity Gradient'
+author: "Liangzi"
+date: "2025-04-18"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      fig.path = "../figures/06_Ordination/")
+```
+
+Scientific Question
+
+**INTERPRETATION #1: What is your scientific question and hypotheses? Do they relate to abundance? Presence/absence? Phylogeny?**
+How does microbial community composition and biodiversity shift across an oxygen concentration gradient in a bioreactor system?
+- This question focuses on abundance-based and presence/absence-based differences in community structure, with some attention to phylogenetic relationships, depending on the diversity metrics used.
+
+*Null Hypothesis:*
+Microbial community composition does not change across the oxygen concentration gradient.
+*Alternative #1 Hypothesis:*
+Microbial composition shifts significantly with oxygen concentration.
+- As oxygen increases or decreases, microbial communities become more dissimilar (e.g., higher Bray-Curtis distances). There is an inverse relationship between oxygen concentration and microbial diversity.
+*Alternative #2 Hypothesis:*
+Dominant members of the microbial community differ between low-oxygen and high-oxygen environments.
+
+# Set up 
+
+## Timing of this script
+
+```{r rmd-start}
+# What time did we start running this script? 
+start_time <- Sys.time()
+```
+
+## Set the seed
+
+```{r set-seed}
+set.seed(238428)
+```
+
+## Load Packages, colors & functions  
+```{r load-packages}
+pacman::p_load(tidyverse, devtools, phyloseq, patchwork, vegan, 
+               install = FALSE)
+
+# Load Colors 
+source("code/colors.R")
+
+# Load functions 
+source("code/functions.R")
+```
+
+# 1. Load in the data 
+
+```{r load-data}
+# Since I don't have 'archaeal_rooted_physeq' in the dataset, I would just load 'midpoint_rooted_physeq.RData' for this part of analysis
+
+# load phyloseq object
+load("data/04_PhylogeneticTree/midpoint_rooted_physeq.RData")
+midpoint_rooted_physeq
+
+# Intuition check on seq depth
+min(sample_sums(midpoint_rooted_physeq))
+```
+
+```{r create-metadata_df}
+# Create Metadata_df 
+metadata_df <- 
+  midpoint_rooted_physeq %>%
+  sample_data() %>%
+  data.frame()
+
+# Extract oxygen level from 'Sample.Names' (e.g., 20 from "AME-D2-20O2-16s")
+metadata_df <- 
+  metadata_df %>%
+  mutate(oxygen_level = str_extract(Sample.Name, "\\d+(?=O2)"))
+# Convert to numeric
+metadata_df$oxygen_level <- as.numeric(metadata_df$oxygen_level)
+
+# Add back into phyloseq
+sample_data(midpoint_rooted_physeq) <- sample_data(metadata_df)
+
+# view of it
+glimpse(metadata_df)
+```
+
+
+```{r check-object}
+midpoint_rooted_physeq
+phyloseq::sample_data(midpoint_rooted_physeq)
+phyloseq::otu_table(midpoint_rooted_physeq)
+phyloseq::tax_table(midpoint_rooted_physeq)
+```
+
+
+# Normalizing the Read Depth 
+
+## 2. Explore the Raw Read Counts 
+
+```{r explore-read-counts, fig.width=6, fig.height=3}
+# calculate read counts per sample 
+raw_TotalSeqs_df <- 
+  midpoint_rooted_physeq %>%
+  sample_sums() %>%
+  data.frame() %>%
+  tibble::rownames_to_column(var = "names")  # Fix here: move rownames to a column
+
+# Rename the column 
+colnames(raw_TotalSeqs_df)[2] <- "TotalSeqs"
+
+# Add num_ASVs
+raw_TotalSeqsASVs_df <- 
+  raw_TotalSeqs_df %>%
+  mutate(num_ASVs = colSums(otu_table(midpoint_rooted_physeq) > 1))
+
+# Plot histogram of seq depth
+rawSeq_histogram <- 
+  raw_TotalSeqsASVs_df %>%
+  ggplot(aes(x = TotalSeqs)) + 
+  geom_histogram(bins = 50) + 
+  scale_x_continuous(limits = c(0, max(raw_TotalSeqsASVs_df$TotalSeqs) * 1.05)) + 
+  labs(title = "Raw Seq Depth Histogram") + 
+  theme_bw()
+
+# Plot seq depth vs ASVs
+rawSeq_vs_numASV_plot <- 
+  raw_TotalSeqsASVs_df %>%
+  ggplot(aes(x = num_ASVs, y = TotalSeqs)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") + 
+  labs(title = "Seq Depth vs # ASVs") + 
+  theme_bw()
+
+# Combine plots
+library(patchwork)
+print(rawSeq_histogram + rawSeq_vs_numASV_plot +
+        plot_annotation(tag_levels = "A"))
+```
+
+**INTERPRETATION #2: Evaluating the above plots, what did you scale the read counts to in your dataset? Why did you choose that number? Do you think it is sufficient to perform a beta-diversity analysis and accurately compare your data to one another?**
+
+Based on the histogram, most samples are above 25,000 reads, so a rarefaction depth of 25,000 would be a conservative choice that allows me to retain most samples while avoiding bias from uneven sampling effort.
+
+Yes, 25,000+ reads per sample is generally considered more than sufficient for beta-diversity analysis. 
+The dataset has high sequencing depth per sample and narrow distribution (most samples are clustered close in total reads). This makes it quite suitable for accurate beta-diversity comparisons using methods like Bray-Curtis, UniFrac, etc.
+
+
+# 3. Scale Read Counts 
+
+```{r scale-reads, fig.width=6, fig.height=3}
+min(sample_sums(midpoint_rooted_physeq))
+
+# Scale the reads 
+scaled_physeq <- 
+  midpoint_rooted_physeq %>%
+  scale_reads(round = "matround")
+
+# Look at it 
+scaled_physeq
+
+# Look at it more!
+#View(data.frame(otu_table(archaeal_rooted_physeq)))
+#View(data.frame(otu_table(scaled_physeq)))
+
+# Confirm seq read depth of scaled_physeq 
+scaled_TotalSeqs_df <- 
+  scaled_physeq %>%
+  sample_sums() %>%
+  data.frame()
+
+colnames(scaled_TotalSeqs_df)[1] <- "TotalSeqs"
+
+# add a new column of num_ASVs (RAW, non-noramlized # ASVs)
+scaled_TotalSeqsASVs_df <- 
+  scaled_TotalSeqs_df %>%
+  mutate(num_ASVs = colSums(otu_table(scaled_physeq) > 1))
+
+# Plot it! 
+scaledSeq_histogram <- 
+  scaled_TotalSeqs_df %>%
+  ggplot(aes(x = TotalSeqs)) + 
+  geom_histogram(bins = 50) + 
+  labs(title = "Scaled Seq Depth Histogram") + 
+  scale_x_continuous(limits = c(0, 60000)) + 
+  theme_bw()
+
+# Scaling always gives us a range! 
+# MInimum sequences
+min(scaled_TotalSeqs_df$TotalSeqs) 
+# Total Range 
+range(scaled_TotalSeqs_df)
+# How many is that range? 
+range_seqs <- (max(scaled_TotalSeqs_df$TotalSeqs) - min(scaled_TotalSeqs_df$TotalSeqs))
+range_seqs
+# And in terms of percent? 
+range_seqs/max(scaled_TotalSeqs_df$TotalSeqs)
+#View(scaled_TotalSeqs_df)
+
+# Set the axis min and max for the next plot 
+max_y <- max(scaled_TotalSeqs_df$TotalSeqs) + 10
+min_y <- min(scaled_TotalSeqs_df$TotalSeqs) - 10
+
+# Now, draw the plot 
+scaledSeq_vs_numASV_plot <- 
+  scaled_TotalSeqsASVs_df %>%
+  ggplot(aes(x = num_ASVs, y = TotalSeqs)) + 
+  geom_point() + 
+  scale_y_continuous(limits = c(min_y, max_y)) +
+  #geom_smooth(method = "lm") + 
+  theme_bw() + 
+  labs(title = "Scaled: Seq Depth vs # ASVs")
+
+# Put the two plots together.
+scaledSeq_histogram + scaledSeq_vs_numASV_plot +
+  plot_annotation(tag_levels = "A")
+```
+
+**INTERPRETATION #3: Evaluate the scaled read count plots above. Are the total number of sequences across all of your samples in the same general range? What is the minimum and maximum (i.e., the range) of the sequencing depth? How was the relationship with the number of ASVs modified after scaling the read counts?**
+
+- Yes. Panel A shows a histogram of total sequences, and all bars are stacked at a single value, indicating that each sample has almost the exact same sequencing depth after scaling.
+- The minimum sequencing depth is 24183, and the maximum sequencing depth is 24226. The range of the sequencing depth is 43.
+- In Panel B, despite having nearly identical sequencing depths, the number of ASVs still varies widely across samples from 150 to 400. The variation in ASV richness is not simply due to sequencing depth.
+Scaling removed depth as a confounding factor, so the observed differences in ASV counts reflect true biological differences in richness across samples.
+
+
+# Beta Diversity: Dissimilarity Metrics in Microbial Ecology
+
+## Similarity versus Dissimilarity
+
+## Common dissimilarity measures
+
+## Five Types of Dissimilarities
+### A. Jaccard Dissimilarity
+### B. Sorensen-Dice Dissimilarity
+### C. Bray-Curtis Dissimilarity
+### D. Unweighted UniFrac Dissimilarity
+### E. Weighted UniFrac Dissimilarity
+
+
+# 4. Calculating dissimilarity
+Now, let's make distance objects of each of the dissimiliarity measures above! 
+
+```{r calc-dissimilarity}
+# Sorensen Dissimiliarty
+scaled_sorensen_dist <- phyloseq::distance(scaled_physeq, method = "bray", binary = TRUE)
+
+# What does it look like? 
+class(scaled_sorensen_dist)
+str(scaled_sorensen_dist)
+#head(as.matrix(scaled_sorensen_dist))
+
+# Bray-Curtis Dissimiliarty
+scaled_bray_dist <- phyloseq::distance(scaled_physeq, method = "bray", binary = FALSE)
+
+# Abundance-Unweighted UniFrac
+scaled_uUnifrac_dist <- phyloseq::distance(scaled_physeq, method = "unifrac")
+
+# Abundance-Weighted UniFrac
+scaled_wUnifrac_dist <- phyloseq::distance(scaled_physeq, method = "wunifrac")
+```
+
+**INTERPRETATION #4: Which dissimilarity metric is most related to your scientific question? Why or why not?**
+
+Bray-Curtis dissimilarity is the most appropriate beta diversity metric for my scientific question because it captures changes in microbial community composition based on relative abundance, which is directly relevant to understanding how oxygen levels might influence the structure (but not necessarily richness) of microbial communities in bioreactors.
+
+
+# 5a. PERMANOVA: Testing Means/Centroids
+
+## Categorical & Continuous Variables in PERMANOVA
+
+### Sorensen
+
+```{r PERMANOVA-categorical-sorensen}
+# Remove samples with missing metadata (NA)
+metadata_df_clean <- metadata_df %>%
+  drop_na(oxygen_level, Collection_Date)
+
+# Filter phyloseq object to only those samples
+scaled_physeq_clean <- prune_samples(rownames(metadata_df_clean), scaled_physeq)
+
+# Recalculate distance matrix
+scaled_sorensen_dist <- phyloseq::distance(scaled_physeq_clean, method = "bray", binary = TRUE)
+
+# Sorensen
+## 1. Run with by = terms for R² values, sensitive to order of variables! 
+## ALWAYS check and confirm the order of your terms and how they interact with each other.  
+sorensen_oxygen_adonis_terms1 <- adonis2(scaled_sorensen_dist ~ oxygen_level * Collection_Date, data = metadata_df_clean, by = "terms")
+sorensen_oxygen_adonis_terms1
+
+# Check the order of the terms
+sorensen_oxygen_adonis_terms2 <- adonis2(scaled_sorensen_dist ~ Collection_Date * oxygen_level, data = metadata_df_clean, by = "terms")
+sorensen_oxygen_adonis_terms2
+
+## 2. Run with by = "margin" for marginal p-values, which we can compare to the residuals from the first one. 
+sorensen_oxygen_adonis_margin <- adonis2(scaled_sorensen_dist ~ Collection_Date * oxygen_level, data = metadata_df_clean, by = "margin")
+sorensen_oxygen_adonis_margin
+```
+
+### Interpreting PERMANOVA - Sorensen
+As it applies to the Sorensen Dissimilarity,we can state that: 
+
+1. **Collection Date** is the strongest factor, explaining ~16% of the variation, with pvalue of0.056 in microbial community composition, which is statistically significant based on the p-value. This suggests temporal shifts in community composition across the sampling window.
+2. **Oxygen Level** also contributes significantly ~7% of variation, with pvalue of 0.647, indicating operational condition differences among reactor systems play a major role in structuring the community.
+3.	The **interaction between Collection Date and Oxygen Level** explains an additional ~7% of the variation, with a significant pvalue of 0.737, meaning the effect of time varies across operational conditions.
+4. Finally, the total residiuals of the model is ~70% of the variation remains unexplained by these variables, which is typical in complex environmental microbiome datasets.
+
+**Biological takeaway:**
+Both oxygen level and collection date independently and interactively shape microbial beta diversity in this dataset based off of shared presence/absence of ASVs as it relates to the Sorensen dissimilarity.
+Therefore, we will need to explore the role that abundance plays in shaping microbial community composition using the Bray-Curtis Dissimilarity.
+
+### PERMANOVA: Continuous variable with names for different samples 
+
+```{r PERMANOVA-sorensen-names}
+## Now, let's add a continuous variable. 
+sorensen_names_adonis_terms1 <- adonis2(scaled_sorensen_dist ~ oxygen_level * Collection_Date * names, data = metadata_df_clean, by = "terms")
+sorensen_names_adonis_terms1
+
+# Check different order 
+sorensen_names_adonis_terms2 <- adonis2(scaled_sorensen_dist ~ names * oxygen_level * Collection_Date, data = metadata_df_clean, by = "terms")
+sorensen_names_adonis_terms2
+```
+
+**These two models together show that:**
+Sample names are unimportant in both models. That makes sense in the reactor system's data (e.g., different samples have different operational conditions/parameters (i.e. oxygen levels) that set up by the authors.
+
+
+### Bray-Curtis
+
+```{r PERMANOVA-categorical-bray}
+# Bray-Curtis PERMANOVA (using cleaned metadata)
+
+# 1. Extract sample names from distance matrix
+dist_samplenames <- 
+  rownames(as.matrix(scaled_bray_dist))
+
+# 2. Subset metadata to match sample names
+metadata_matched <- 
+  metadata_df_clean[dist_samplenames, ]
+
+# 3. Remove rows with missing values in key variables
+metadata_matched_noNA <- 
+  metadata_matched %>%
+  filter(!is.na(oxygen_level), !is.na(Collection_Date))
+
+# 4. Subset distance matrix to match cleaned metadata
+bray_dist_noNA <- 
+  as.dist(as.matrix(scaled_bray_dist)[rownames(metadata_matched_noNA), rownames(metadata_matched_noNA)])
+
+# 5. Run adonis2 with by = "terms" (order-sensitive)
+bray_oxygen_adonis_terms1 <- adonis2(bray_dist_noNA ~ oxygen_level * Collection_Date, data = metadata_matched_noNA, by = "terms")
+bray_oxygen_adonis_terms1
+
+bray_oxygen_adonis_terms2 <- adonis2(bray_dist_noNA ~ Collection_Date * oxygen_level, data = metadata_matched_noNA, by = "terms")
+bray_oxygen_adonis_terms2
+
+# 6. Run adonis2 with by = "margin" (order-insensitive)
+bray_oxygen_adonis_margin <- adonis2(bray_dist_noNA ~ Collection_Date * oxygen_level, data = metadata_matched_noNA, by = "margin")
+bray_oxygen_adonis_margin
+```
+
+### Interpreting PERMANOVA - Bray-Curtis
+
+We can state that:
+**Collection Date** is the strongest factor, explaining ~19% of the variation with pvalue of 0.049, in microbial community composition. This suggests temporal shifts in community composition across the sampling window.
+
+**Oxygen Level** also contributes ~7% of variation, with pvalue of 0.546, indicating operational condition differences among reactor systems play a major role in structuring the community.
+
+**The interaction between Collection Date and Oxygen Level** explains an additional ~5.5% of the variation, with a pvalue of 0.738, meaning the low effect of time for sampling in different reactor systems — i.e., community change at collection time is uniform across oxygen levels.
+
+Finally, the total residiuals of the model is ~68% of the variation remains unexplained by these variables, which is typical in complex environmental microbiome datasets.
+
+**Comparing Sorensen & Bray Curtis Results**
+The Sorensen model explains ~2% more total variation, suggesting that abundance patterns (not just presence/absence) capture additional ecological structure.
+
+The higher R2 for collection date in Bray-Curtis (~16% vs. ~19%) indicates that abundance shifts across time are even more pronounced than presence/absence alone would suggest.
+
+Residual variation is lower in Bray-Curtis (~68% vs. ~70%), further supporting its added sensitivity to ecologically meaningful abundance patterns.
+
+*In other words:*
+Community composition is relatively influenced by collection date and oxygen level in both models, but the Sorensen model (abundance-based) explains more variation overall — especially for collection date effects. This suggests that abundance shifts, not just species turnover, play a role in structuring microbial communities in this system over time and operational conditions.
+
+**Since sample names are unimportant, that makes sense to neglect this part "PERMANOVA: Continuous variable with names for different samples" **
+
+
+**INTERPRETATION #5: Using the above example to guide you, run the appropriate PERMANOVA for your scientific question and interpret the results. What biological conclusion can you draw from your PERMANOVA results?**
+
+The PERMANOVA results suggest that oxygen concentration does not significantly influence microbial beta diversity in this bioreactor system. Instead, temporal variation plays a more substantial role, indicating community turnover or succession over time.
+
+
+## Salinity's role in Community Composition
+
+# 5b. Betadisper: Testing Variances/Dispersions
+
+## Sorensen
+If p > 0.05 (not significant), the PERMANOVA result is reliable.
+If p < 0.05 (significant), be cautious—group differences may be due to dispersion, not composition! However, not all is lost as we may expect this to be biologically true.
+
+```{r betadisper-sorensen}
+# Homogeneity of Disperson test with beta dispr
+# Sorensen Betadisper - Station 
+dispr_sorensen_oxygen <- betadisper(scaled_sorensen_dist, metadata_df_clean$oxygen_level)
+# permutest() performs a non-parametric permutation test, which is robust and valid for the kind of data used in beta diversity analysis (e.g., dissimilarity matrices).
+permutest(dispr_sorensen_oxygen)
+
+# Sorensen Betadisper - Date  
+dispr_sorensen_date <- betadisper(scaled_sorensen_dist, metadata_df_clean$Collection_Date)
+permutest(dispr_sorensen_date)
+
+# Sorensen Betadisper - Salinity psu  
+dispr_sorensen_names <- betadisper(scaled_sorensen_dist, metadata_df_clean$names)
+permutest(dispr_sorensen_names)
+```
+
+**Sorensen:**
+Oxygen level does not have a significant betadisper()/permutest() result. Therefore, we cannot conclude for certain that our PERMANOVA results are truly because of Oxygen level. 
+Collection date does not have a significant betadisper()/permutest() result. Therefore, the PERMANOVA results likely represent a true difference by date.
+Sample names does not have a significant betadisper()/permutest() result and we can also trust that the PERMANOVA results are real.
+
+
+## Bray-Curtis
+
+Now, let's test the same with Bray-Curtis!
+
+```{r betadisper-bray}
+# Ensure sample names match in both distance matrix and metadata
+# Subset distance matrix again just to be sure:
+bray_dist_matched <- 
+  as.dist(as.matrix(scaled_bray_dist)[rownames(metadata_matched_noNA), rownames(metadata_matched_noNA)])
+
+# Run Bray-Curtis betadisper using correct grouping factor - Oxygen Level
+dispr_bray_oxygen <- betadisper(bray_dist_matched, metadata_matched_noNA$oxygen_level)
+permutest(dispr_bray_oxygen)
+
+# Bray-Curtis Betadisper - Date
+dispr_bray_date <- betadisper(bray_dist_matched, metadata_matched_noNA$Collection_Date)
+permutest(dispr_bray_date)
+
+# Bray-Curtis Betadisper - Sample Names 
+dispr_bray_names <- betadisper(bray_dist_matched, metadata_matched_noNA$names)
+permutest(dispr_bray_names)
+```
+
+**INTERPRETATION #6: Using the above example to guide you, run the appropriate betadisper() and permutest() for your scientific question and interpret the results. What biological conclusion can you draw from your dispersion analysis?**
+
+There is no evidence that community dispersion differs significantly across oxygen concentrations or sampling dates. This suggests that any observed group separation in ordination plots is not due to unequal variance among groups, but instead might reflect true differences in community structure (which leads us to PERMANOVA).
+
+**INTERPRETATION #7: Taking into account both the betadisper()/permutest() and the PERMANOVA (adonis2()) test that you ran, what biological conclusion can you draw regarding your data?**
+
+The PERMANOVA result for oxygen_level is not significant (p = 0.534). The betadisper() result for oxygen_level is also not significant (p = 0.755), confirming that differences in dispersion do not confound this. Therefore, we can conclude that microbial community composition is not significantly affected by oxygen concentration in this dataset.
+
+The PERMANOVA result for Collection_Date is significant (p = 0.043), indicating that microbial composition changed over time. betadisper() shows no significant difference in dispersion by date (p = 0.988), meaning this finding is robust and not an artifact of variability. Temporal shifts in microbial community composition were detected, but oxygen level was not a significant driver of those differences.
+
+Multivariate analysis using Bray-Curtis dissimilarity revealed that microbial community structure did not differ significantly between oxygen levels, nor did oxygen impact community variability (dispersion). However, significant differences were observed across collection dates, suggesting that temporal factors rather than oxygen concentration were the dominant drivers of microbial community shifts in the bioreactors during this study.
+
+# 6. Visualize Community Dissimilarity with Ordination
+
+# 6a. PCoA: Principal Coordinates Analysis
+
+```{r pcoa-plots, fig.height=3.5, fig.width=7}
+### SORENSEN 
+sample_data(scaled_physeq)$Collection_Date <- as.factor(sample_data(scaled_physeq)$Collection_Date)
+
+# First, calculate PCoA with Soresen
+scaled_soren_pcoa <- 
+  ordinate(physeq = scaled_physeq,
+         method = "PCoA",
+         distance = "bray", binary = TRUE)
+
+# Take a quick look
+str(scaled_soren_pcoa)
+
+# Plot it: Sorensen PCoA
+sorensen_pcoa_plot <- 
+  plot_ordination(physeq = scaled_physeq,
+                  ordination = scaled_soren_pcoa,
+                  color = "oxygen_level",
+                  shape = "Collection_Date",
+                  title = "Sorensen PCoA") + 
+  scale_color_viridis_c(option = "D") +  # continuous scale
+  scale_shape_manual(values = c(15, 16, 17, 18, 19, 3, 7)) + 
+  geom_point(size = 5, alpha = 0.5, aes(color = oxygen_level)) + 
+  theme_bw() + 
+  theme(legend.position = "right")
+
+# Bray-Curtis PCoA plot
+bray_pcoa_plot <- 
+  plot_ordination(physeq = scaled_physeq,
+                  ordination = scaled_bray_pcoa,
+                  color = "oxygen_level",
+                  shape = "Collection_Date",
+                  title = "Bray-Curtis PCoA") + 
+  scale_color_viridis_c(option = "D") + 
+  scale_shape_manual(values = c(15, 16, 17, 18, 19, 3, 7)) + 
+  geom_point(size = 5, alpha = 0.5, aes(color = oxygen_level)) + 
+  theme_bw() + 
+  theme(legend.position = "right")
+
+# Combine plots
+sorensen_pcoa_plot + bray_pcoa_plot + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+```
+
+**Figures:**
+Left (Panel A): Sorensen dissimilarity (presence/absence-based)
+Right (Panel B): Bray-Curtis dissimilarity (abundance-weighted)
+**INTERPRETATION #8: Plot your data using a PCoA. Interpret what you can conclude from the PCoA.**
+
+- Oxygen level clearly separates samples across both Sorensen and Bray-Curtis ordinations. This indicates that oxygen level is a key environmental driver of community composition. Both presence/absence (Sorensen) and abundance (Bray-Curtis) data reflect strong structure across oxygen levels.
+- Collection Date are spatially grouped in the ordination space, especially in the Bray-Curtis plot. This suggests that sampling date is associated with microbial community shifts, likely due to seasonal changes or succession.
+- Bray-Curtis captures more variation. The first two axes of Bray-Curtis explain 25.4% + 18.7% = 44.1% of the variation, compared to 19.8% + 16.4% = 36.2% for Sorensen. This indicates that abundance differences add informative structure not captured by presence/absence alone.
+- Cluster separation suggests distinct microbial assemblages. The visual clustering and separation between some samples (especially at high vs. low oxygen levels) point to potentially distinct microbial assemblages under different oxygen conditions.
+
+
+## 6b. NMDS: Non-Metric Multidimensional Scaling 
+
+```{r soren-nmds}
+## SORENSEN 
+scaled_soren_nmds <- 
+  ordinate(physeq = scaled_physeq,
+         method = "NMDS",
+         distance = "bray", binary = TRUE)
+
+# Plot it! 
+sorensen_nmds_plot <- 
+  plot_ordination(physeq = scaled_physeq,
+                ordination = scaled_soren_nmds,
+                color = "oxygen_level",
+                shape = "Collection_Date",
+                title = "Sorensen NMDS") + 
+  scale_color_viridis_c(option = "D") + 
+  scale_shape_manual(values = c(15, 16, 17, 18, 19, 3, 7)) + 
+  geom_point(size = 5, alpha = 0.5, aes(color = oxygen_level)) + 
+  theme_bw() + 
+  theme(legend.position = "right")
+
+### Bray-Curtis 
+# Second, calculate NMDS with Bray-Curtis
+scaled_bray_nmds <- 
+  ordinate(physeq = scaled_physeq,
+         method = "NMDS",
+         distance = "bray", binary = FALSE)
+
+# Plot it: Bray-Curtis NMDS 
+bray_nmds_plot <- 
+  plot_ordination(physeq = scaled_physeq,
+                ordination = scaled_bray_nmds,
+                color = "oxygen_level",
+                shape = "Collection_Date",
+                title = "Bray-Curtis NMDS") + 
+  scale_color_viridis_c(option = "D") +  
+  scale_shape_manual(values = c(15, 16, 17, 18, 19, 3, 7)) + 
+  geom_point(size = 5, alpha = 0.5, aes(color = oxygen_level)) + 
+  theme_bw() + 
+  theme(legend.position = "right")
+
+# Show the plots 
+sorensen_nmds_plot + bray_nmds_plot + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+```
+
+**INTERPRETATION #9: Plot your data using NMDS. Interpret what you can conclude from the NMDS.**
+
+- The color gradient (representing oxygen_level) shows a clear trend along the NMDS axes in both Sorensen and Bray-Curtis ordinations. Samples with similar oxygen levels tend to cluster together, indicating oxygen concentration is a strong driver of community structure.
+
+- The different shapes represent sampling dates, and these are spatially separated in the NMDS space. This suggests that microbial communities change over time, potentially in response to environmental changes or ecological succession.
+
+- In a summary, oxygen level is a major structuring factor of microbial communities in the samples.
+Sampling date also reflects ecological variation, perhaps linked to changing environmental conditions or microbial succession. Abundance and composition-based metrics reveal consistent ecological patterns, confirming robustness of the findings.
+
+
+## All ordinations together!
+
+```{r ordinations, fig.width=7, fig.height=6}
+sorensen_pcoa_plot + bray_pcoa_plot + 
+sorensen_nmds_plot + bray_nmds_plot + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+```
+
+**INTERPRETATION #10: Plot both the PCoA and NMDS together. Which of the two visualizations work best for your data? Explain your reasoning.**
+
+Bray-Curtis PCoA (Panel B) reveals distinct clustering by sampling date and oxygen level.
+Sorensen PCoA (Panel A) also shows meaningful structure, though slightly less separation than Bray-Curtis.
+
+NMDS panels (especially D, Bray-Curtis) show similar groupings, but clusters are more diffuse, making it harder to discern clear structure. 
+NMDS relies on low stress for interpretability, but the plot doesn’t include it. It also doesn't provide percent variation on axes, making interpretation less straightforward.
+
+Conclusion:
+PCoA with Bray-Curtis dissimilarity (Panel B) is the most informative ordination for your dataset. 
+- It shows stronger separation among samples along meaningful environmental gradients (oxygen level).
+- The variation explained is higher than in Sorensen PCoA, suggesting that abundance differences among taxa are important in shaping community structure.
+- It best reveals the effects of oxygen level and collection date on microbial communities, captures more variation in the first two axes, and provides clearer visual clustering than NMDS.
+
+
+# Now what? 
+
+Based on the results above, which metric would you use to write up your paper: Sorensen or Bray-Curtis?
+**Bray-Curtis**
+
+# Final info for Reproducibility 
+
+## Check Render Time
+```{r stop-time}
+# Take the time now that we are at the end of the script
+end_time <- Sys.time()
+end_time 
+
+# Echo the elapsed time
+elapsed_time <- round((end_time - start_time), 3)
+elapsed_time
+```
+
+## Session Information
+
+```{r session-info}
+# Ensure reproducibility with package version information
+devtools::session_info()
+```
+
+
