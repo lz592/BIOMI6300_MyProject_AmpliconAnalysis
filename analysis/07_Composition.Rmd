@@ -1,0 +1,737 @@
+---
+title: "Microbial Compositional Analysis Along A Salinity Gradient"
+author: "Liangzi"
+date: "2025-04-23"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE,
+                      fig.path = "../figures/07_Composition/")
+```
+
+**INTERPRETATION #1: What are the limitations of interpreting microbial abundance from relative (aka. compositional) rather than absolute counts?**
+
+- Relative abundances always sum to 100%, meaning an increase in one taxon automatically implies a decrease in others—even if their absolute counts didn’t change. This can introduce false correlations and distort real ecological patterns.
+- Also, we might lose information about sequencing depth or biomass, so we can’t determine whether overall microbial load changed. This is especially problematic if some samples had drastically higher/lower DNA concentrations or total reads.
+- Relative abundance is still useful for comparative purposes, but it’s best paired with absolute quantification (e.g., qPCR, spike-ins) when the goal is to understand total microbial load or track true growth/decline.
+
+
+# Setup 
+
+## Load Packages 
+```{r load-packages}
+# Load in the packages 
+pacman::p_load(tidyverse, devtools, DT, phyloseq, patchwork, 
+               install = FALSE)
+
+# load colors
+source("code/colors.R")
+```
+
+
+## 1. Load in Scaled Phyloseq object 
+
+```{r load-data}
+load("data/06_Ordination/scaled_physeq.RData")
+
+# Look at the data 
+scaled_physeq
+
+# Intuition check - scaled at 1,942
+min(sample_sums(scaled_physeq))
+range(sample_sums(scaled_physeq))
+```
+
+
+# Taxonomic Analysis!
+
+## A. Phylum 
+
+```{r calc-phylum-df}
+# Create a phylum level dataframe
+phylum_df <- 
+  scaled_physeq %>%
+  tax_glom(taxrank = "Phylum") %>%
+  transform_sample_counts(function(x) {x / sum(x)}) %>%
+  psmelt() %>%
+  mutate(Collection_Date = fct_relevel(as.character(Collection_Date), c("2019-06-03", "2019-06-08", "2019-06-14", "2019-06-15", "2019-06-20")),   # Convert date to character before releveling
+         # If oxygen_level is numeric, convert to factor first
+         oxygen_level = fct_relevel(as.factor(oxygen_level), c("5", "10", "20", "25")))
+
+## What are the phylum abundances? 
+phylum_df %>%
+  group_by(Phylum) %>%
+  summarize(mean_PercAbund = round(mean(Abundance), digits = 4)) %>%
+  arrange(-mean_PercAbund) %>%
+  datatable()
+
+# Make a list of phyla the top phyla 
+top10_phyla <- 
+  phylum_df %>%
+  group_by(Phylum) %>%
+  summarize(mean_PercAbund = mean(Abundance)) %>%
+  arrange(-mean_PercAbund) %>%
+  head(n = 10) %>%
+  pull(Phylum)
+```
+
+**INTERPRETATION #2: Which phyla in your dataset have the highest relative abundances? What are their abundances? We will focus on these phyla for plotting below.**
+
+Based on the table of mean relative abundances at the phylum level:
+The most abundant phyla in the dataset is Pseudomonadota (75.58%). 
+The table suggests a highly uneven distribution, dominated primarily by Pseudomonadota (75.58%), Bacteroidota (15.22%), Bacillota (4.58%) and Chloroflexota (2%). 
+
+
+## Stacked Bar plots 
+
+```{r phylum-stacked-bar, fig.width=9, fig.height=3.5}
+# Stacked Bar Plot With All phyla 
+# Plot Phylum Abundances - make sure to load phylum_colors 
+phylum_df %>%
+  dplyr::filter(Phylum %in% top10_phyla) %>%
+  ggplot(aes(x = Collection_Date, y = Abundance, fill = Phylum)) + 
+  facet_grid(.~oxygen_level) + 
+  geom_bar(stat = "identity", color = "black") + 
+  labs(title = "Top 10 Phyla: Relative Abundance by Oxygen Level") + 
+  scale_fill_manual(values = phylum_colors) + 
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
+
+
+## Faceted Bar plot 
+
+```{r phylum-facet-bar, fig.width=5, fig.height=12}
+phylum_df %>%
+  dplyr::filter(Phylum %in% top10_phyla) %>%
+  # Individual sample comparison of surface waters, whole fraction 
+  # This will allow us to look at individual samples! 
+  # Note that whenever plotting stacked bar plots, you should always look at Individual samples! 
+  ggplot(aes(x = oxygen_level, y = Abundance, fill = Phylum)) + 
+  facet_grid(Phylum~Collection_Date, scale = "free") + 
+  # add the stacked bar 
+  geom_bar(stat = "identity", color = "black") + 
+  # change the colors to be our selected colors 
+  scale_fill_manual(values = phylum_colors) + 
+  theme_bw() + 
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+### Or combined together: 
+phylum_df %>%
+  dplyr::filter(Phylum %in% top10_phyla) %>%
+  ggplot(aes(x = oxygen_level, y = Abundance, fill = Phylum, color = Phylum)) + 
+  facet_grid(Phylum~Collection_Date, scale = "free") + 
+  # add the stacked bar 
+  geom_jitter() +
+  geom_boxplot(outlier.shape = NA, alpha = 0.5) + 
+  # change the colors to be our selected colors 
+  scale_fill_manual(values = phylum_colors) + 
+  scale_color_manual(values = phylum_colors) + 
+  theme_bw() + 
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
+
+```{r plot-phylum-station, fig.width=12, fig.height=6}
+### Or combined together: 
+phylum_df %>%
+  dplyr::filter(Phylum %in% top10_phyla) %>%
+  ggplot(aes(x = oxygen_level, y = Abundance, fill = Phylum, color = Phylum)) + 
+  facet_wrap(Phylum~., scales = "free", nrow = 2) + 
+  # add the stacked bar 
+  geom_jitter() +
+  geom_boxplot(outlier.shape = NA, alpha = 0.5) + 
+  # change the colors to be our selected colors 
+  scale_fill_manual(values = phylum_colors) + 
+  scale_color_manual(values = phylum_colors) + 
+  theme_bw() + 
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
+
+**INTERPRETATION #3: Make the above dotplot and boxplot for your sample types and your most abundant phyla. What initial conclusions can you draw regarding the sampled microbial communities as it relates to your scientific question?**
+
+*Actinomycetota:*
+Shows distinct structuring across dates and oxygen levels.
+Could indicate temporal niche partitioning, or preference for certain redox states or community successional stages.
+
+*Bacillota & Chloroflexota:*
+Patchy and variable distributions.
+These groups may reflect more specialized metabolic roles that are sensitive to oxygen concentration or influenced by other environmental co-factors like substrate availability.
+
+*Bacteroidota:*
+Present across most oxygen levels but increased relative abundance at higher oxygen concentrations, hinting at aerobic preference or adaptation to well-oxygenated environments.
+
+*Candidatus Kapabacteria:*
+Appears at low relative abundance but shows fluctuations across oxygen levels.
+May be part of the rare biosphere, possibly opportunistic or responding to subtle micro-niches.
+
+*Pseudomonadota:*
+Consistently dominant across all oxygen levels (especially visible in the boxplot).
+Shows high abundance even under low-oxygen conditions, suggesting broad ecological tolerance or metabolic versatility.
+
+*Key finding:*
+- The microbial community in the bioreactor samples is clearly structured by oxygen level, with several phyla showing differential abundance patterns. 
+- Dominant taxa like Pseudomonadota and Bacteroidota may play key functional roles and thrive under a range of oxygen conditions. Other taxa show oxygen-dependent shifts, suggesting ecological filtering, niche specialization, or sensitivity to redox gradients.
+
+**After initial exploration, we focus on specific phyla that appear to vary across oxygen levels. These targeted plots help develop hypotheses about ecological drivers:**
+Bacteroidota, Chloroflexota, Bacillota, Pseudomonadota.
+
+
+### A1. Bacteroidota 
+
+```{r phylum-Bactero, fig.width=7, fig.height=3.5}
+# Bacteroidota: Boxplot and dotplot by oxygen level (CATEGORICAL)
+Bactero_phylum_oxygen <- 
+  phylum_df %>%
+  dplyr::filter(Phylum == "Bacteroidota") %>%
+  ggplot(aes(x = factor(oxygen_level), y = Abundance, 
+             fill = factor(oxygen_level), color = factor(oxygen_level))) + 
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) + 
+  geom_jitter() + 
+  theme_bw() + 
+  labs(title = "Bacteroidota Relative Abundance by Oxygen Level",
+       x = "Oxygen Level", y = "Relative Abundance") + 
+  scale_color_viridis_d() + 
+  scale_fill_viridis_d() + 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1),
+        legend.position = "none")
+
+# Bacteroidota: Trend over continuous Collection_Date (CONTINUOUS)
+Bactero_phylum_date <- 
+  phylum_df %>%
+  dplyr::filter(Phylum == "Bacteroidota") %>%
+  ggplot(aes(x = Collection_Date, y = Abundance)) + 
+  geom_point(aes(color = factor(oxygen_level)), size = 3) + 
+  geom_smooth(method = "lm", formula = y ~ poly(as.numeric(x), 2)) + 
+  labs(title = "Bacteroidota Abundance Over Time",
+       x = "Collection Date", y = "Relative Abundance") +
+  scale_color_viridis_d(name = "Oxygen Level") + 
+  theme_bw() + 
+  theme(legend.position = "right")
+
+# Combine the plots
+Bactero_phylum_oxygen + Bactero_phylum_date + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+```
+
+Bacteroidota Abundance Across Oxygen Level and Collection Date
+
+A. The relative abundance of Bacteroidota is evenly distributed across different oxygen levels, with the highest abundance observed at mild oxygen levels (10 and 15). It may reflect a niche preference (e.g., facultative anaerobes preferring mid-oxygen conditions).
+B. Over time, Bacteroidota abundance peaks around late-sampling dates and slightly decreases toward the early sampling points. However, the abundance remains relatively low across all collection dates, indicating that Bacteroidota are a stable, but non-dominant group in these microbial communities throughout the sampling period.
+
+Bacteroidota are generally anaerobic bacteria, meaning they thrive in the absence of oxygen. However, some Bacteroidota species are aerotolerant, meaning they can survive, but not grow, when exposed to oxygen. Their decline with increasing oxygen concentration suggests sensitivity and less tolarance to high oxygen level.
+
+
+### A2: Chloroflexota
+
+```{r phylum-Chloro, fig.width=7, fig.height=3.5}
+# Chloroflexota: Boxplot and dotplot by oxygen level (CATEGORICAL)
+Chloro_phylum_oxygen <- 
+  phylum_df %>%
+  dplyr::filter(Phylum == "Chloroflexota") %>%
+  ggplot(aes(x = factor(oxygen_level), y = Abundance, 
+             fill = factor(oxygen_level), color = factor(oxygen_level))) + 
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) + 
+  geom_jitter() + 
+  theme_bw() + 
+  labs(title = "Chloroflexota Relative Abundance by Oxygen Level",
+       x = "Oxygen Level", y = "Relative Abundance") + 
+  scale_color_viridis_d() + 
+  scale_fill_viridis_d() + 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1),
+        legend.position = "none")
+
+# Chloroflexota: Trend over continuous Collection_Date (CONTINUOUS)
+Chloro_phylum_date <- 
+  phylum_df %>%
+  dplyr::filter(Phylum == "Chloroflexota") %>%
+  ggplot(aes(x = Collection_Date, y = Abundance)) + 
+  geom_point(aes(color = factor(oxygen_level)), size = 3) + 
+  geom_smooth(method = "lm", formula = y ~ poly(as.numeric(x), 2)) + 
+  labs(title = "Chloroflexota Abundance Over Time",
+       x = "Collection Date", y = "Relative Abundance") +
+  scale_color_viridis_d(name = "Oxygen Level") + 
+  theme_bw() + 
+  theme(legend.position = "right")
+
+# Combine the plots
+Chloro_phylum_oxygen + Chloro_phylum_date + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+```
+
+Chloroflexota Abundance Across Oxygen Level and Collection Date
+
+A. Chloroflexota relative abundance is higher in mild-oxygen level (10 and 15) and lower in the lowest- and highest-oxygen levels (5 and 25). 
+B. Over time, Chloroflexota abundance also remains consistently low, with a minor peak across the sampling dates. The low variability indicates that Chloroflexota populations are relatively stable 
+
+Chloroflexota are often abundant members of the biomass in wastewater treatment plants. In activated sludge systems, changes in oxygen concentration can influence the relative abundance of Chloroflexota and other bacteria. Their growth and metabolic activity are affected by the presence and concentration of oxygen. Their response to oxygen level helps indicate shifts in primary production potential.
+
+
+### A3: Bacillota
+
+```{r phylum-Bacillota, fig.width=7, fig.height=3.5}
+# Deinococcota: Boxplot and dotplot by oxygen level (CATEGORICAL)
+Bacill_phylum_oxygen <- 
+  phylum_df %>%
+  dplyr::filter(Phylum == "Bacillota") %>%
+  ggplot(aes(x = factor(oxygen_level), y = Abundance, 
+             fill = factor(oxygen_level), color = factor(oxygen_level))) + 
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) + 
+  geom_jitter() + 
+  theme_bw() + 
+  labs(title = "Bacillota Relative Abundance by Oxygen Level",
+       x = "Oxygen Level", y = "Relative Abundance") + 
+  scale_color_viridis_d() + 
+  scale_fill_viridis_d() + 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1),
+        legend.position = "none")
+
+# Bacillota: Trend over continuous Collection_Date (CONTINUOUS)
+Bacill_phylum_date <- 
+  phylum_df %>%
+  dplyr::filter(Phylum == "Bacillota") %>%
+  ggplot(aes(x = Collection_Date, y = Abundance)) + 
+  geom_point(aes(color = factor(oxygen_level)), size = 3) + 
+  geom_smooth(method = "lm", formula = y ~ poly(as.numeric(x), 2)) + 
+  labs(title = "Bacillota Abundance Over Time",
+       x = "Collection Date", y = "Relative Abundance") +
+  scale_color_viridis_d(name = "Oxygen Level") + 
+  theme_bw() + 
+  theme(legend.position = "right")
+
+# Combine the plots
+Bacill_phylum_oxygen + Bacill_phylum_date + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+```
+
+Bacillota Abundance Across Oxygen Levels and Collection Date
+
+A. Bacillota relative abundance remains consistently very low across all oxygen levels, with only minor fluctuations. There is a slight decrease in abundance at higher oxygen levels (20–25), but the overall abundance remains low (<0.03) throughout. This suggests that oxygen concentration does not strongly drive Bacillota dynamics in this system.
+B. Over time, Bacillota abundance also remains consistently low, with no major peaks or drops across the sampling dates. The low variability indicates that Bacillota populations are relatively stable but minor community members in this dataset.
+
+Bacillota are a diverse phylum that includes both spore-forming and anaerobic lineages. Their low relative abundance in this estuarine system may reflect unfavorable environmental conditions such as oxygen levels, salinity, or competition with more metabolically versatile groups like Pseudomonadota. These results suggest that Bacillota do not play a major ecological role under the sampled conditions but could become important under more extreme environmental shifts (e.g., anoxic events).
+
+
+### A4. Pseudomonadota
+
+```{r phylum-Pseudomonadota, fig.width=7, fig.height=3.5}
+# Pseudomonadota: Boxplot and dotplot by oxygen level (CATEGORICAL)
+actino_phylum_oxygen <- 
+  phylum_df %>%
+  dplyr::filter(Phylum == "Pseudomonadota") %>%
+  ggplot(aes(x = factor(oxygen_level), y = Abundance, 
+             fill = factor(oxygen_level), color = factor(oxygen_level))) + 
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) + 
+  geom_jitter() + 
+  theme_bw() + 
+  labs(title = "Pseudomonadota Relative Abundance by Oxygen Level",
+       x = "Oxygen Level", y = "Relative Abundance") + 
+  scale_color_viridis_d() + 
+  scale_fill_viridis_d() + 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1),
+        legend.position = "none")
+
+# Pseudomonadota: Trend over continuous Collection_Date (CONTINUOUS)
+actino_phylum_date <- 
+  phylum_df %>%
+  dplyr::filter(Phylum == "Pseudomonadota") %>%
+  ggplot(aes(x = Collection_Date, y = Abundance)) + 
+  geom_point(aes(color = factor(oxygen_level)), size = 3) + 
+  geom_smooth(method = "lm", formula = y ~ poly(as.numeric(x), 2)) + 
+  labs(title = "Pseudomonadota Abundance Over Time",
+       x = "Collection Date", y = "Relative Abundance") +
+  scale_color_viridis_d(name = "Oxygen Level") + 
+  theme_bw() + 
+  theme(legend.position = "right")
+
+# Combine the plots
+actino_phylum_oxygen + actino_phylum_date + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+```
+
+Pseudomonadota Abundance Across Oxygen Levels and Collection Date
+
+A. Pseudomonadota relative abundance is consistently high across all oxygen levels, but there is a slight increasing trend from low (5) to higher (25) oxygen concentrations. While the overall abundance remains elevated (>0.8 in most samples), the spread (variance) increases at intermediate oxygen levels, suggesting some environmental variability influencing this group at those conditions.
+B. Over time, Pseudomonadota abundance peaks around mid-sampling dates and slightly decreases toward the later sampling points. However, the abundance remains relatively high across all collection dates, indicating that Pseudomonadota are a stable, dominant group in these microbial communities throughout the sampling period.
+
+Pseudomonadota are known for their metabolic versatility and ability to thrive under a wide range of environmental conditions, including varied oxygen levels. Their consistently high abundance across samples suggests strong adaptability to changing oxygen availability and temporal fluctuations. This stability highlights their important ecological role in nutrient cycling, resilience, and potentially opportunistic behavior in estuarine environments where conditions shift frequently.
+
+**INTERPRETATION #4: Based on these phylum-level analyses, were there any phyla that you were able to identify to focus on moving forward for deeper taxonomic analyses? Why?**
+
+Yes, based on the phylum-level analyses of my dataset, Pseudomonadota emerged as the most informative candidates for deeper taxonomic exploration.
+
+Pseudomonadota dominated nearly all samples, showing both high abundance and variability. While their ubiquity might make them less informative for biogeographic structuring alone, their dominance suggests a critical role in bioreactor microbial dynamics. Zooming in on genus- or species-level variation could help identify key players in bioprocessing functions.
+
+
+## B. Genus
+
+```{r genus-actino-plots, fig.width=12, fig.height=4}
+# Calculate the Family relative abundance 
+# Note: The read depth MUST be normalized in some way: scale_reads
+genus_df <- 
+  scaled_physeq %>%
+  # agglomerate at the phylum level 
+  tax_glom(taxrank = "Genus") %>% 
+  # Transform counts to relative abundance 
+  transform_sample_counts(function (x) {x/sum(x)}) %>%
+  # Melt to a long format 
+  psmelt() %>%
+  # Fix the order of date
+  mutate(Collection_Date = fct_relevel(as.character(Collection_Date), c("2019-06-03", "2019-06-08", "2019-06-14", "2019-06-15", "2019-06-20")),
+    oxygen_level = fct_relevel(as.factor(oxygen_level), c("5", "10", "20", "25")))
+```
+
+
+### B1. Pseudomonadota Genera 
+
+```{r Pseudo-genus, fig.width=6, fig.height=6}
+# Pseudomonadota
+# Plot genus 
+Pseudo_genus_oxygen <- 
+  genus_df %>%
+  dplyr::filter(Phylum == "Pseudomonadota") %>%
+  # At first, plot all of the genera and then subset the ones that have intersting trends
+  dplyr::filter(Genus %in% c("Methylobacter", "Comamonas")) %>%
+  # build the plot 
+  ggplot(aes(x = factor(oxygen_level), y = Abundance,
+             fill = factor(oxygen_level), color = factor(oxygen_level))) +
+  facet_wrap(. ~ Genus, scales = "free_y", nrow = 1) +
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.7) +
+  labs(title = "Pseudomonadota Genera by Oxygen Level",
+       x = "Oxygen Level", y = "Relative Abundance") +
+  scale_color_viridis_d() + 
+  scale_fill_viridis_d() + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1),
+        legend.position = "none")
+
+# Plot genus: Continuous 
+Pseudo_genus_date <- 
+  genus_df %>%
+  dplyr::filter(Phylum == "Pseudomonadota") %>%
+  dplyr::filter(Genus %in% c("Methylobacter", "Comamonas")) %>%
+  ggplot(aes(x = Collection_Date, y = Abundance)) +
+  facet_wrap(. ~ Genus, scales = "free_y", nrow = 1) +
+  geom_point(aes(color = as.numeric(as.character(oxygen_level)))) +
+  scale_color_viridis_c(option = "D") +
+  geom_smooth(method = "lm", formula = y ~ poly(x, 2)) +
+  labs(title = "Pseudomonadota Genera Over Time",
+       x = "Collection Date", y = "Relative Abundance") +
+  scale_color_viridis_c(option = "D") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+# Collect the Pseudomonadota Plots
+Pseudo_genus_oxygen / Pseudo_genus_date + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+```
+
+**INTERPRETATION #5: Please make some plots of mid-level taxonomic ranks (e.g. Genus, Family, Order) as it relates to your scientific question. Were there any changes in the mid-level taxonomic trends compared to the phylum-level results? What does that tell you about that taxonomic group?**
+
+This figure presents the relative abundance of three dominant Pseudomonadota genera—Comamonas, and Methylobacter in response to environmental oxygen levels (A) and over time (B).
+
+*Oxygen-Level Patterns (Panel A):*
+- Comamonas shows a broad oxygen tolerance, with its abundance increasing steadily from low (5%) to high (25%) oxygen levels. This pattern suggests that Comamonas is metabolically versatile and potentially favors more oxic conditions.
+- Methylobacter peaks sharply at intermediate oxygen levels (20%) but declines at both lower and higher levels. This could indicate an optimal oxygen niche, possibly due to its role in methylotrophic processes that require specific redox conditions.
+
+*Temporal Patterns (Panel B):*
+- Comamonas shows temporal fluctuations, with a distinct peak in relative abundance on June 8 and again on June 20, suggesting that transient environmental conditions (e.g., nutrient pulses, temperature shifts) may strongly influence its abundance.
+- Methylobacter is not plotted in the time series, possibly due to filtering or low detection frequency on some dates.
+
+*These genus-level trends offer a more nuanced view compared to phylum-level summaries:*
+- While Pseudomonadota overall may appear broadly distributed and dominant across conditions, individual genera within the phylum clearly exhibit niche-specific ecological responses.
+- The data suggest Comamonas thrives under higher oxygen and variable temporal conditions, while Methylobacter has a narrower niche, peaking at moderate oxygen levels.
+- This reinforces the importance of examining microbial community structure at finer taxonomic scales, as ecological roles and responses to environmental gradients can vary substantially within a single phylum.
+
+Together, these patterns support a hypothesis that oxygen concentration is a key environmental filter acting on Pseudomonadota genera, driving distinct abundance patterns that reflect metabolic specialization or tolerance.
+
+
+## C. ASV level
+
+```{r ASV-plots, fig.width=12, fig.height=4}
+# Calculate the Family relative abundance 
+# Note: The read depth MUST be normalized in some way: scale_reads
+ASV_df <- 
+  scaled_physeq %>%
+  ## LOOK AT HOW MANY ARE REMOVED! We scaled to 24,199 reads! 
+  prune_taxa(taxa_sums(.) >= 2419, .) %>%
+  # agglomerate at the phylum level 
+  tax_glom(taxrank = "ASV") %>% 
+  # Transform counts to relative abundance 
+  transform_sample_counts(function (x) {x/sum(x)}) %>%
+  # Melt to a long format 
+  psmelt() %>%
+  # fix the order of date
+  mutate(Collection_Date = fct_relevel(as.character(Collection_Date), c("2019-06-03", "2019-06-08", "2019-06-14", "2019-06-15", "2019-06-20")),
+         oxygen_level = fct_relevel(as.factor(oxygen_level), c("5", "10", "20", "25")))
+```
+
+
+### C1. Bdellovibrionota ASVs 
+
+```{r Bactero-asvs, fig.width=6, fig.height=8}
+# Calculate top couple of ASVs 
+# Make a list of phyla the top phyla 
+top_Bactero_ASVs <- 
+  ASV_df %>%
+  dplyr::filter(Phylum == "Bacteroidota") %>%
+  dplyr::filter(Genus %in% c("Daejeonia", "Cloacibacterium")) %>%
+  group_by(ASV) %>%
+  summarize(mean_Abundance = mean(Abundance)) %>%
+  dplyr::filter(mean_Abundance > 0.005) %>%
+  pull(ASV)
+
+# Bacteroidota
+# Plot ASVs 
+Bactero_asv_oxygen <- 
+  ASV_df %>%
+  dplyr::filter(ASV %in% top_Bactero_ASVs) %>%
+  # build the plot 
+  ggplot(aes(x = factor(oxygen_level), y = Abundance,
+             fill = factor(oxygen_level), color = factor(oxygen_level))) +
+  facet_wrap(Genus~ASV, scales = "free_y", nrow = 2) + 
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) + # outliers not plotted here in boxplot 
+  geom_jitter() + 
+  theme_bw() + 
+  labs(title = "Bacteroidota ASVs", x = "Oxygen Level", y = "Abundance") + 
+  scale_color_viridis_d() + 
+  scale_fill_viridis_d() + 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1),
+        legend.position = "none")
+
+# Plot ASVs: Continuous 
+Bactero_asv_date <- 
+  ASV_df %>%
+  dplyr::filter(ASV %in% top_Bactero_ASVs) %>%
+  # build the plot 
+  ggplot(aes(x = Collection_Date, y = Abundance)) + 
+  facet_wrap(Genus~ASV, scales = "free_y", nrow = 2) + 
+  geom_point(aes(color = Collection_Date)) +  
+  scale_color_viridis_d(option = "D") +
+  theme_bw() + 
+  geom_smooth(method = "lm",  formula = y ~ poly(x, 2)) + 
+  labs(title = "Bacteroidota ASVs", x = "Collection Date", y = "Abundance") + 
+  scale_color_viridis_d(option = "D") +
+  theme(legend.position = "none")
+
+# Collect the Bacteroidota Plots
+Bactero_asv_oxygen / Bactero_asv_date + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+```
+
+
+### C2. Chloroflexota ASVs 
+
+```{r Chloro-asvs, fig.width=6, fig.height=8}
+# Calculate top couple of ASVs 
+# Make a list of phyla the top phyla 
+top_Chloro_ASVs <- 
+  ASV_df %>%
+  dplyr::filter(Phylum == "Chloroflexota") %>%
+  dplyr::filter(Genus %in% c("UTCFX1")) %>%
+  group_by(ASV) %>%
+  summarize(mean_Abundance = mean(Abundance)) %>%
+  dplyr::filter(mean_Abundance > 0.005) %>%
+  pull(ASV)
+
+# Chloroflexota
+# Plot ASVs 
+Chloro_asv_oxygen <- 
+  ASV_df %>%
+  dplyr::filter(ASV %in% top_Chloro_ASVs) %>%
+  # build the plot 
+  ggplot(aes(x = factor(oxygen_level), y = Abundance,
+             fill = factor(oxygen_level), color = factor(oxygen_level))) +
+  facet_wrap(Genus~ASV, scales = "free_y", nrow = 2) + 
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) + # outliers not plotted here in boxplot 
+  geom_jitter() + 
+  theme_bw() + 
+  labs(title = "Chloroflexota ASVs", x = "Oxygen Level", y = "Abundance") + 
+  scale_color_viridis_d() + 
+  scale_fill_viridis_d() + 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1),
+        legend.position = "none")
+
+# Plot ASVs: Continuous 
+Chloro_asv_date <- 
+  ASV_df %>%
+  dplyr::filter(ASV %in% top_Chloro_ASVs) %>%
+  # build the plot 
+  ggplot(aes(x = Collection_Date, y = Abundance)) + 
+  facet_wrap(Genus~ASV, scales = "free_y", nrow = 2) + 
+  geom_point(aes(color = Collection_Date)) +  
+  scale_color_viridis_d(option = "D") +
+  theme_bw() + 
+  geom_smooth(method = "lm",  formula = y ~ poly(x, 2)) + 
+  labs(title = "Chloroflexota ASVs", x = "Collection Date", y = "Abundance") + 
+  scale_color_viridis_d(option = "D") +
+  theme(legend.position = "none")
+
+# Collect the Bacteroidota Plots
+Chloro_asv_oxygen / Chloro_asv_date + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+```
+
+### C3. Bacillota ASVs 
+
+```{r Bacill-asvs, fig.width=6, fig.height=8}
+# Calculate top couple of ASVs 
+# Make a list of phyla the top phyla 
+top_Bacill_ASVs <- 
+  ASV_df %>%
+  dplyr::filter(Phylum == "Bacillota") %>%
+  dplyr::filter(Genus %in% c("Mesobacillus", "Solibacillus")) %>%
+  group_by(ASV) %>%
+  summarize(mean_Abundance = mean(Abundance)) %>%
+  dplyr::filter(mean_Abundance > 0.005) %>%
+  pull(ASV)
+
+# Bacillota
+# Plot ASVs 
+Bacill_asv_oxygen <- 
+  ASV_df %>%
+  dplyr::filter(ASV %in% top_Bacill_ASVs) %>%
+  # build the plot 
+  ggplot(aes(x = factor(oxygen_level), y = Abundance,
+             fill = factor(oxygen_level), color = factor(oxygen_level))) +
+  facet_wrap(Genus~ASV, scales = "free_y", nrow = 2) + 
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) + # outliers not plotted here in boxplot 
+  geom_jitter() + 
+  theme_bw() + 
+  labs(title = "Bacillota ASVs", x = "Oxygen Level", y = "Abundance") + 
+  scale_color_viridis_d() + 
+  scale_fill_viridis_d() + 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1),
+        legend.position = "none")
+
+# Plot ASVs: Continuous 
+Bacill_asv_date <- 
+  ASV_df %>%
+  dplyr::filter(ASV %in% top_Bacill_ASVs) %>%
+  # build the plot 
+  ggplot(aes(x = Collection_Date, y = Abundance)) + 
+  facet_wrap(Genus~ASV, scales = "free_y", nrow = 2) + 
+  geom_point(aes(color = Collection_Date)) +  
+  scale_color_viridis_d(option = "D") +
+  theme_bw() + 
+  geom_smooth(method = "lm",  formula = y ~ poly(x, 2)) + 
+  labs(title = "Bacillota ASVs", x = "Collection Date", y = "Abundance") + 
+  scale_color_viridis_d(option = "D") +
+  theme(legend.position = "none")
+
+# Collect the Bacteroidota Plots
+Bacill_asv_oxygen / Bacill_asv_date + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+```
+
+
+### C4. Pseudomonadota ASVs 
+
+```{r Pseudo-asvs, fig.width=6, fig.height=8}
+# Calculate top couple of ASVs 
+# Make a list of phyla the top phyla 
+top_Pseudo_ASVs <- 
+  ASV_df %>%
+  dplyr::filter(Phylum == "Pseudomonadota") %>%
+  dplyr::filter(Genus %in% c("UBA6140", "Methylobacter")) %>%
+  group_by(ASV) %>%
+  summarize(mean_Abundance = mean(Abundance)) %>%
+  dplyr::filter(mean_Abundance > 0.005) %>%
+  pull(ASV)
+
+# Pseudomonadota
+# Plot ASVs 
+Pseudo_asv_oxygen <- 
+  ASV_df %>%
+  dplyr::filter(ASV %in% top_Pseudo_ASVs) %>%
+  # build the plot 
+  ggplot(aes(x = factor(oxygen_level), y = Abundance,
+             fill = factor(oxygen_level), color = factor(oxygen_level))) +
+  facet_wrap(Genus~ASV, scales = "free_y", nrow = 2) + 
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) + # outliers not plotted here in boxplot 
+  geom_jitter() + 
+  theme_bw() + 
+  labs(title = "Pseudomonadota ASVs", x = "Oxygen Level", y = "Abundance") + 
+  scale_color_viridis_d() + 
+  scale_fill_viridis_d() + 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1),
+        legend.position = "none")
+
+# Plot ASVs: Continuous 
+Pseudo_asv_date <- 
+  ASV_df %>%
+  dplyr::filter(ASV %in% top_Pseudo_ASVs) %>%
+  # build the plot 
+  ggplot(aes(x = Collection_Date, y = Abundance)) + 
+  facet_wrap(Genus~ASV, scales = "free_y", nrow = 2) + 
+  geom_point(aes(color = Collection_Date)) +  
+  scale_color_viridis_d(option = "D") +
+  theme_bw() + 
+  geom_smooth(method = "lm",  formula = y ~ poly(x, 2)) + 
+  labs(title = "Pseudomonadota ASVs", x = "Collection Date", y = "Abundance") + 
+  scale_color_viridis_d(option = "D") +
+  theme(legend.position = "none")
+
+# Collect the Pseudomonadota Plots
+Pseudo_asv_oxygen / Pseudo_asv_date + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+```
+
+**INTERPRETATION #6: Were the most abundant ASVs in your dataset represented in your ASV-level plots? If not, please go back and plot them specifically. (Hint: Remember that we ordered our ASV names by abundance across the entire dataset. Therefore, ASV_0006 will be the most abundant, ASV_0015 will be the 4th most abundant and so on.)**
+
+Yes, at least one of the most abundant ASVs was represented in the ASV-level plots.
+ASV_0006, which is visible in the Pseudomonadota plot, appears to be among the most abundant ASVs in the dataset based on its high relative abundance.
+
+**INTERPRETATION #7: Please make some plots at the ASV level as it relates to your scientific question. Were there any ASVs that were especially related to trends that you saw? Did a specific phylogenetic group all show the same trends? Or did the ASVs have various, likely niche-specific responses?**
+
+*Bacteroidota: Abundant but varied*
+ASV_0002 and ASV_0005 (Daejeonia) show high relative abundance, particularly under moderate oxygen levels (10–20). ASV_0036 (Cloacibacterium) remains lower overall but also shows some oxygen-level association.
+These patterns suggest ecological filtering by oxygen, but also genus-specific preferences.
+
+*Chloroflexota: Strong oxygen association*
+ASVs (e.g., ASV_0031 and ASV_0038 from genus UTCFX1) are low at low oxygen levels but show slight increases at higher oxygen levels (20–25). 
+This may suggest an aerotolerant or aerobic preference, consistent with Chloroflexota’s metabolic diversity.
+
+*Bacillota: Strong oxygen association*
+ASVs shows low abundance across all oxygen levels. This may suggest that oxygen isn’t a key environmental driver for this ASV’s distribution.
+
+*Pseudomonadota: Diverse and oxygen-sensitive*
+ASVs in the genus Methylobacter (ASV_0006, ASV_0010, ASV_0033) and UBA6140 show clear decreases in abundance at higher oxygen levels (25).
+This suggests these ASVs may prefer lower oxygen or be sensitive to oxygen concentration, showing niche-specific responses. Despite belonging to the same phylum, not all ASVs responded similarly, indicating functional diversity within Pseudomonadota.
+
+**INTERPRETATION #8: Now, do a quick literature or google search and look back in the paper that you may be replicating (if applicable). Does your ASV-level changes represent something that is currently known? Or is this a novel result? What did you learn about this ASV or a group of ASVs in your dataset?**
+
+For Pseudomonadota:
+Pseudomonas is a multi-functional genus containing many species that have anaerobic or aerobic denitrification abilities. Based on the ASV-level analysis, I found that this diverse group includes ASVs that are generalists, thriving across a range of oxygen levels. Their consistent presence suggests metabolic versatility, allowing them to adapt to varying oxygen conditions. 
+
+For Bacteroidota and Bacillota: 
+These phyla may display varied responses. Some ASVs might be more prevalent in low-oxygen environments, indicating potential roles in anaerobic processes. But most of the ASVs might be more prevalent in high-oxygen environments, indicating potential roles in aerobic processes.
+
+For Chloroflexota: 
+These ASVs showed low abundance over all oxygen levels. These taxa are consistently present in low numbers and may become active under specific environmental conditions not captured in your sampling.
+This pattern suggests a preference for both aerobic and anaerobic environments and aligns with their known metabolic capabilities in degrading recalcitrant organic matter under oxic conditions.
+
+These observations indicate that while some ASVs have niche-specific responses to oxygen availability, others maintain stable populations regardless of oxygen levels, highlighting the complexity of microbial community dynamics.
+
+
+# Session Information 
+For reproducibility 
+```{r session_info}
+devtools::session_info()
+```
+
