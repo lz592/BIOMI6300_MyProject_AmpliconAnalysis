@@ -160,6 +160,7 @@ scaled_physeq <-
 
 # Look at it 
 scaled_physeq
+save(scaled_physeq, file = "data/06_Ordination/scaled_physeq.RData")
 
 # Look at it more!
 #View(data.frame(otu_table(archaeal_rooted_physeq)))
@@ -459,7 +460,7 @@ Multivariate analysis using Bray-Curtis dissimilarity revealed that microbial co
 
 # 6a. PCoA: Principal Coordinates Analysis
 
-```{r pcoa-plots, fig.height=3.5, fig.width=7}
+```{r pcoa-plots, fig.height=3.5, fig.width=15}
 ### SORENSEN 
 sample_data(scaled_physeq)$Collection_Date <- as.factor(sample_data(scaled_physeq)$Collection_Date)
 
@@ -486,6 +487,11 @@ sorensen_pcoa_plot <-
   theme(legend.position = "right")
 
 # Bray-Curtis PCoA plot
+scaled_bray_pcoa <- 
+  ordinate(physeq = scaled_physeq,
+         method = "PCoA",
+         distance = "bray", binary = FALSE)
+
 bray_pcoa_plot <- 
   plot_ordination(physeq = scaled_physeq,
                   ordination = scaled_bray_pcoa,
@@ -507,6 +513,7 @@ sorensen_pcoa_plot + bray_pcoa_plot +
 **Figures:**
 Left (Panel A): Sorensen dissimilarity (presence/absence-based)
 Right (Panel B): Bray-Curtis dissimilarity (abundance-weighted)
+
 **INTERPRETATION #8: Plot your data using a PCoA. Interpret what you can conclude from the PCoA.**
 
 - Oxygen level clearly separates samples across both Sorensen and Bray-Curtis ordinations. This indicates that oxygen level is a key environmental driver of community composition. Both presence/absence (Sorensen) and abundance (Bray-Curtis) data reflect strong structure across oxygen levels.
@@ -575,7 +582,7 @@ Sampling date also reflects ecological variation, perhaps linked to changing env
 
 ## All ordinations together!
 
-```{r ordinations, fig.width=7, fig.height=6}
+```{r ordinations, fig.width=20, fig.height=6}
 sorensen_pcoa_plot + bray_pcoa_plot + 
 sorensen_nmds_plot + bray_nmds_plot + 
   plot_layout(guides = "collect") +
